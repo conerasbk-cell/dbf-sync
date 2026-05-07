@@ -100,7 +100,7 @@ def compute_checksum(filepath):
     return h.hexdigest()
 
 def create_version_from_uploads():
-    files = list(DB_UPLOADS_DIR.glob("*.dbf"))
+    files = [f for f in DB_UPLOADS_DIR.iterdir() if f.suffix.lower() == ".dbf"]
     if not files:
         return None
 
@@ -377,7 +377,8 @@ def api_upload():
     uploaded = 0
     for f in files:
         if f.filename.lower().endswith(".dbf"):
-            f.save(str(DB_UPLOADS_DIR / f.filename))
+            safe_name = f.filename[:-4] + ".dbf"
+            f.save(str(DB_UPLOADS_DIR / safe_name))
             uploaded += 1
     if uploaded > 0:
         logging.info(f"Subidos {uploaded} archivos via web")
