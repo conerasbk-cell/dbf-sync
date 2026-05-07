@@ -1,5 +1,5 @@
 {
-    "server_url": "https://URL-DEL-TUNNEL.trycloudflare.com",
+    "server_url": "https://dbf-sync.onrender.com",
     "conera_name": "NOMBRE-DE-LA-CONERA",
     "check_interval": 300,
     "data_dir": "C:\\Bootdrv\\AlohaQs\\DATA",
