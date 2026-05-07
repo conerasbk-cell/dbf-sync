@@ -61,8 +61,34 @@ If fso.FileExists(strConfigFile) Then
 End If
 
 ' ===========================================
+' SINGLE INSTANCE - Evita duplicados
+' ===========================================
+Dim strLockFile
+strLockFile = fso.BuildPath(fso.GetSpecialFolder(2), "dbf-sync-" & strConeraName & ".lock")
+On Error Resume Next
+' Si el lock existe y tiene mas de 5 min, se ignora (la instancia anterior murio)
+If fso.FileExists(strLockFile) Then
+    If DateDiff("s", fso.GetFile(strLockFile).DateLastModified, Now) > 300 Then
+        fso.DeleteFile strLockFile, True
+    Else
+        WScript.Quit ' Otra instancia corriendo
+    End If
+End If
+Dim lockFile
+Set lockFile = fso.CreateTextFile(strLockFile, True)
+lockFile.WriteLine Now
+lockFile.Close
+On Error Goto 0
+
+' ===========================================
 ' FUNCIONES
 ' ===========================================
+
+Sub CleanupLock()
+    On Error Resume Next
+    fso.DeleteFile strLockFile, True
+    On Error Goto 0
+End Sub
 
 Sub Log(msg)
     Dim logLine
@@ -140,20 +166,29 @@ Sub WriteForceApplied(version)
     On Error Goto 0
 End Sub
 
-Function HttpGet(url)
-    Dim xmlhttp
-    Set xmlhttp = CreateObject("MSXML2.XMLHTTP.3.0")
+Function CreateHttp()
     On Error Resume Next
-    xmlhttp.Open "GET", url, False
-    xmlhttp.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
-    xmlhttp.Send
+    Set CreateHttp = CreateObject("WinHttp.WinHttpRequest.5.1")
+    If Err.Number <> 0 Then
+        Set CreateHttp = CreateObject("MSXML2.XMLHTTP.3.0")
+    End If
+    On Error Goto 0
+End Function
+
+Function HttpGet(url)
+    Dim http
+    Set http = CreateHttp()
+    On Error Resume Next
+    http.Open "GET", url, False
+    http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+    http.Send
     If Err.Number <> 0 Then
         HttpGet = ""
         Exit Function
     End If
     On Error Goto 0
-    If xmlhttp.Status = 200 Then
-        HttpGet = xmlhttp.ResponseText
+    If http.Status = 200 Then
+        HttpGet = http.ResponseText
     Else
         HttpGet = ""
     End If
@@ -186,25 +221,25 @@ Function HttpGetJsonBool(jsonText, key)
 End Function
 
 Function HttpGetBinary(url, savePath)
-    Dim xmlhttp, ado
-    Set xmlhttp = CreateObject("MSXML2.XMLHTTP.3.0")
+    Dim http, ado
+    Set http = CreateHttp()
     On Error Resume Next
-    xmlhttp.Open "GET", url, False
-    xmlhttp.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
-    xmlhttp.Send
+    http.Open "GET", url, False
+    http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+    http.Send
     If Err.Number <> 0 Then
         HttpGetBinary = False
         Exit Function
     End If
     On Error Goto 0
-    If xmlhttp.Status <> 200 Then
+    If http.Status <> 200 Then
         HttpGetBinary = False
         Exit Function
     End If
     Set ado = CreateObject("ADODB.Stream")
     ado.Type = 1
     ado.Open
-    ado.Write xmlhttp.ResponseBody
+    ado.Write http.ResponseBody
     ado.SaveToFile savePath, 2
     ado.Close
     HttpGetBinary = True
@@ -354,36 +389,46 @@ Function CheckForceUpdate()
 
     Dim ackData
     ackData = "{""name"":""" & strConeraName & """,""status"":""" & CStr(downloaded) & """}"
-    Dim xmlhttp
-    Set xmlhttp = CreateObject("MSXML2.XMLHTTP.3.0")
+    Dim http
+    Set http = CreateHttp()
     On Error Resume Next
-    xmlhttp.Open "POST", strServerUrl & "/api/force-update-ack", False
-    xmlhttp.SetRequestHeader "Content-Type", "application/json"
-    xmlhttp.Send ackData
+    http.Open "POST", strServerUrl & "/api/force-update-ack", False
+    http.SetRequestHeader "Content-Type", "application/json"
+    http.Send ackData
     On Error Goto 0
 
     CheckForceUpdate = True
 End Function
 
 Sub CheckIn(version)
-    Dim url, xmlhttp
+    Dim url, http
     url = strServerUrl & "/api/conera/checkin"
-    Set xmlhttp = CreateObject("MSXML2.XMLHTTP.3.0")
+    Set http = CreateHttp()
     On Error Resume Next
-    xmlhttp.Open "POST", url, False
-    xmlhttp.SetRequestHeader "Content-Type", "application/json"
-    xmlhttp.Send "{""name"":""" & strConeraName & """,""version"":""" & version & """}"
+    http.Open "POST", url, False
+    http.SetRequestHeader "Content-Type", "application/json"
+    http.Send "{""name"":""" & strConeraName & """,""version"":""" & version & """}"
+    If Err.Number = 0 And http.Status = 200 Then
+        Log "Check-in enviado: " & version
+    Else
+        LogError "Error en check-in: " & Err.Description
+    End If
     On Error Goto 0
 End Sub
 
 Sub Register()
-    Dim url, xmlhttp
+    Dim url, http
     url = strServerUrl & "/api/conera/register"
-    Set xmlhttp = CreateObject("MSXML2.XMLHTTP.3.0")
+    Set http = CreateHttp()
     On Error Resume Next
-    xmlhttp.Open "POST", url, False
-    xmlhttp.SetRequestHeader "Content-Type", "application/json"
-    xmlhttp.Send "{""name"":""" & strConeraName & """}"
+    http.Open "POST", url, False
+    http.SetRequestHeader "Content-Type", "application/json"
+    http.Send "{""name"":""" & strConeraName & """}"
+    If Err.Number = 0 And http.Status = 200 Then
+        Log "Registrado en servidor"
+    Else
+        LogError "Error al registrar: " & Err.Description
+    End If
     On Error Goto 0
 End Sub
 
