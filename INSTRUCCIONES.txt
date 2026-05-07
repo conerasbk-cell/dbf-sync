@@ -44,60 +44,26 @@ Abra https://dbf-sync.onrender.com en su navegador:
 PARTE 2 - CONFIGURAR CADA CONERA
 --------------------------------------------
 
-A. Para CONERAS Windows 7 o 10:
+A. Para CONERAS Windows 7 o 10 (Windows normal):
 
-   1. Copie estos 2 archivos a la conera:
-      - dbf-sync-client.exe
-      - client/sync-config.json
+   Ya no se usa el .exe, se cambio a VBScript porque varios equipos
+   tienen Windows Embedded que no es compatible con Python.
 
-   2. EDITE sync-config.json con:
-
-      {
-        "server_url": "https://dbf-sync.onrender.com",
-        "conera_name": "NOMBRE-DE-ESTA-CONERA",
-        "check_interval": 300,
-        "data_dir": "C:\\Bootdrv\\AlohaQs\\DATA",
-        "newdata_dir": "C:\\Bootdrv\\AlohaQs\\NEWDATA",
-        "iberqs_path": "C:\\BootDrv\\AlohaQS\\BIN\\IBERQS.exe",
-        "version_file": "C:\\Bootdrv\\AlohaQs\\version.txt",
-        "log_file": "C:\\Bootdrv\\AlohaQs\\sync-log.txt",
-        "retry_attempts": 5,
-        "retry_delay": 30
-      }
-
-      Solo cambie: "conera_name" por el nombre de la conera (K135, etc.)
-
-   3. Ejecute dbf-sync-client.exe
-      - Corre en segundo plano (sin ventana)
-      - Cada 5 minutos revisa si hay nueva version
-
-   4. Para que inicie automaticamente con Windows:
-      - Cree acceso directo a dbf-sync-client.exe
-      - Peguelo en Inicio > Ejecutar > shell:startup
+   Siga las mismas instrucciones que para XP abajo.
 
 
-B. Para CONERAS Windows XP:
+B. Para CONERAS Windows (XP, Embedded, 7, 10):
 
-   1. Copie estos 2 archivos a la conera:
-      - client/dbf-sync-client-xp.vbs
-      - client/sync-config.txt
+   Use los ZIPs ya preparados en la carpeta zips/:
 
-   2. EDITE sync-config.txt con bloc de notas:
-
-      server_url=https://dbf-sync.onrender.com
-      conera_name=K135
-
-      Solo cambie: conera_name por el nombre de la conera (K135, etc.)
-      La URL es la misma para todas.
-
-   3. Para ejecutarlo:
-      Haga doble clic en dbf-sync-client-xp.vbs
+   1. Conectese a la conera via AnyDesk/Radmin
+   2. Copie el ZIP de esa conera (ej. K135.zip)
+   3. Extraiga en cualquier carpeta (ej. C:\Bootdrv\AlohaQs\)
+   4. Haga doble clic en dbf-sync-client-xp.vbs
       (NO se abre ventana si se ejecuta con wscript.exe)
-
-   4. Para que inicie con Windows XP:
+   5. Para que inicie con Windows:
       - Cree acceso directo al .vbs
-      - Peguelo en:
-        C:\Documents and Settings\[USUARIO]\Menu Inicio\Programas\Inicio
+      - Peguelo en Inicio > Ejecutar > shell:startup
 
 
 --------------------------------------------

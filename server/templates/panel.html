@@ -407,6 +407,7 @@
         }
 
         // --- Functions ---
+        function fmtDate(t) { return t ? t.replace('T', ' ').slice(0, 16) : '-'; }
         function refreshAll() { loadVersion(); loadConeras(); loadFileList(); loadVersionHistory(); loadCheckinLog(); }
 
         function loadVersion() {
@@ -416,7 +417,7 @@
                     document.getElementById('verVersion').textContent = v.version || 'Ninguna';
                     document.getElementById('verFiles').textContent = v.file_count || '0';
                     document.getElementById('verSize').textContent = v.total_size ? (v.total_size / 1048576).toFixed(2) + ' MB' : '0 MB';
-                    document.getElementById('verDate').textContent = v.created_at ? v.created_at.slice(0, 16) : '-';
+                    document.getElementById('verDate').textContent = fmtDate(v.created_at);
                 }).catch(() => {});
         }
 
@@ -448,7 +449,7 @@
                             <td><strong>${c.name}</strong></td>
                             <td>${zone}</td>
                             <td>${c.ip || '-'}</td>
-                            <td>${c.last_checkin ? c.last_checkin.slice(0, 16) : '-'}</td>
+                            <td>${fmtDate(c.last_checkin)}</td>
                             <td>${c.current_version || '-'}</td>
                             <td>${badge}</td>
                         </tr>`;
@@ -478,7 +479,7 @@
                     }
                     tbody.innerHTML = versions.map(v => `<tr>
                         <td><strong>${v.version}</strong></td>
-                        <td>${v.created_at ? v.created_at.slice(0, 16) : '-'}</td>
+                        <td>${fmtDate(v.created_at)}</td>
                         <td>${v.file_count}</td>
                         <td>${v.total_size ? (v.total_size / 1048576).toFixed(2) + ' MB' : '0 MB'}</td>
                     </tr>`).join('');
@@ -498,7 +499,7 @@
                         <td><strong>${l.name}</strong></td>
                         <td>${l.zone || '-'}</td>
                         <td>${l.version || '-'}</td>
-                        <td>${l.time ? l.time.slice(0, 16) : '-'}</td>
+                        <td>${fmtDate(l.time)}</td>
                     </tr>`).join('');
                 }).catch(() => {});
         }

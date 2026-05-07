@@ -414,17 +414,18 @@ Do While True
     Dim forced
     forced = CheckForceUpdate()
     If Not forced Then
-        ' Check for normal update every 5 min
+        ' Check for normal update every cycle
         normalCycle = normalCycle + 1
         If normalCycle >= 1 Then
             Dim updated
             updated = DownloadAndInstall(False)
             If updated Then
-                CheckIn(ReadLocalVersion())
                 Log "Version actualizada automaticamente"
             End If
             normalCycle = 0
         End If
     End If
+    ' Always send check-in to keep status updated
+    CheckIn ReadLocalVersion()
     WScript.Sleep CHECK_INTERVAL * 1000
 Loop
