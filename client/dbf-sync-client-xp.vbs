@@ -167,12 +167,17 @@ Sub WriteForceApplied(version)
 End Sub
 
 Function CreateHttp()
+    Dim obj
     On Error Resume Next
-    Set CreateHttp = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Set obj = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     If Err.Number <> 0 Then
-        Set CreateHttp = CreateObject("MSXML2.XMLHTTP.3.0")
+        Set obj = CreateObject("WinHttp.WinHttpRequest.5.1")
+    End If
+    If Err.Number <> 0 Then
+        Set obj = CreateObject("MSXML2.XMLHTTP.3.0")
     End If
     On Error Goto 0
+    Set CreateHttp = obj
 End Function
 
 Function HttpGet(url)
