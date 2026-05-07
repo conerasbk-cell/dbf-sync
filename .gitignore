@@ -1,0 +1,13 @@
+*.exe
+cloudflared.exe
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+server/logs/
+server/db_uploads/*
+server/versions/*
+!server/db_uploads/.gitkeep
+!server/versions/.gitkeep
+server/sync.db

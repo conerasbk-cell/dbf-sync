@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBF SYNC - Panel de Control</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #333; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { font-size: 24px; color: #1a73e8; margin-bottom: 5px; }
+        .subtitle { color: #666; font-size: 14px; margin-bottom: 20px; }
+        .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; color: #333; display: flex; align-items: center; gap: 8px; }
+        .version-info { display: flex; gap: 30px; flex-wrap: wrap; }
+        .version-info .item { text-align: center; }
+        .version-info .item .label { font-size: 12px; color: #888; text-transform: uppercase; }
+        .version-info .item .value { font-size: 20px; font-weight: bold; color: #1a73e8; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+        .btn-primary { background: #1a73e8; color: #fff; }
+        .btn-primary:hover { background: #1557b0; }
+        .btn-primary:disabled { background: #999; cursor: not-allowed; }
+        .btn-success { background: #28a745; color: #fff; }
+        .btn-success:hover { background: #1e7e34; }
+        .btn-danger { background: #dc3545; color: #fff; }
+        .btn-danger:hover { background: #b02a37; }
+        .btn-secondary { background: #6c757d; color: #fff; }
+        .btn-secondary:hover { background: #5a6268; }
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .upload-zone { border: 2px dashed #ccc; border-radius: 8px; padding: 30px; text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 15px; }
+        .upload-zone:hover { border-color: #1a73e8; background: #f8f9ff; }
+        .upload-zone.dragover { border-color: #1a73e8; background: #e8f0fe; }
+        .upload-zone p { color: #888; font-size: 14px; }
+        .upload-zone .icon { font-size: 40px; color: #1a73e8; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e0e0e0; font-size: 12px; color: #888; text-transform: uppercase; }
+        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+        tr:hover { background: #f8f9fa; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        .badge-secondary { background: #e2e3e5; color: #383d41; }
+        .status-bar { display: flex; align-items: center; gap: 10px; margin-top: 15px; padding: 10px; background: #e8f0fe; border-radius: 6px; font-size: 14px; }
+        .status-bar.success { background: #d4edda; }
+        .status-bar.error { background: #f8d7da; }
+        .log-area { background: #1e1e1e; color: #d4d4d4; font-family: 'Consolas', 'Courier New', monospace; padding: 15px; border-radius: 6px; max-height: 300px; overflow-y: auto; font-size: 12px; line-height: 1.5; }
+        .log-area .info { color: #6fc ; }
+        .log-area .error { color: #f66; }
+        .hidden { display: none; }
+        .footer { text-align: center; color: #888; font-size: 12px; margin-top: 30px; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 15px 25px; border-radius: 8px; color: #fff; font-weight: 600; opacity: 0; transition: opacity 0.3s; z-index: 9999; }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #28a745; }
+        .toast.error { background: #dc3545; }
+        .file-list { margin-top: 15px; }
+        .file-list .file-item { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+        .file-list .file-item .size { color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>&#9881; DBF SYNC</h1>
+        <div class="subtitle">Panel de Control - Sincronizacion de Archivos DBF a Coneras</div>
+
+        <!-- Estado actual -->
+        <div class="card">
+            <h2>&#128200; Version Actual</h2>
+            <div class="version-info" id="versionInfo">
+                <div class="item">
+                    <div class="label">Version</div>
+                    <div class="value" id="verVersion">{{ version.version if version else 'Ninguna' }}</div>
+                </div>
+                <div class="item">
+                    <div class="label">Archivos</div>
+                    <div class="value" id="verFiles">{{ version.file_count if version else '0' }}</div>
+                </div>
+                <div class="item">
+                    <div class="label">Tamaño</div>
+                    <div class="value" id="verSize">{{ '%0.2f MB' | format(version.total_size / 1048576) if version and version.total_size else '0 MB' }}</div>
+                </div>
+                <div class="item">
+                    <div class="label">Creada</div>
+                    <div class="value" id="verDate" style="font-size:14px;">{{ version.created_at[:16] if version and version.created_at else '-' }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Acciones -->
+        <div class="card">
+            <h2>&#9889; Acciones</h2>
+
+            <!-- Subir archivos -->
+            <div class="upload-zone" id="uploadZone">
+                <div class="icon">&#128194;</div>
+                <p><strong>Arrastra archivos .dbf aqui</strong> o haz clic para seleccionarlos</p>
+                <p style="font-size:12px;color:#aaa;margin-top:5px;">Los archivos se guardaran en la carpeta db_uploads/</p>
+                <input type="file" id="fileInput" multiple accept=".dbf" style="display:none;">
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-primary" id="btnCrearVersion">&#9654; Crear Version</button>
+                <button class="btn btn-success" id="btnRefresh">&#8635; Refrescar</button>
+                <a href="/api/download" class="btn btn-secondary" id="btnDownload" style="text-decoration:none;">&#128229; Descargar ZIP</a>
+                <span style="font-size:13px;color:#888;" id="lblUploadStatus"></span>
+            </div>
+
+            <div class="status-bar hidden" id="statusBar"></div>
+        </div>
+
+        <!-- Forzar Actualizacion -->
+        <div class="card">
+            <h2>&#9889; Forzar Actualizacion en Coneras</h2>
+            <p style="font-size:13px;color:#888;margin-bottom:15px;">Selecciona las coneras o zonas que recibiran la actualizacion al instante.</p>
+            <div class="actions" style="flex-wrap:wrap;gap:10px;">
+                <select id="forceZone" style="padding:10px;border-radius:6px;border:1px solid #ccc;font-size:14px;">
+                    <option value="__all__">Todas las zonas</option>
+                </select>
+                <select id="forceAction" style="padding:10px;border-radius:6px;border:1px solid #ccc;font-size:14px;">
+                    <option value="none">Solo actualizar archivos</option>
+                    <option value="restart">Actualizar y reiniciar POS</option>
+                    <option value="logoff">Actualizar y cerrar sesion</option>
+                </select>
+                <button class="btn btn-danger" id="btnForceUpdate">&#9889; Forzar en seleccionadas</button>
+                <button class="btn btn-danger" id="btnForceAll" style="background:#721c24;">&#9889; Forzar en TODAS</button>
+            </div>
+            <div id="forceStatus" style="margin-top:10px;font-size:13px;color:#888;"></div>
+            <div id="forceResults" style="margin-top:10px;max-height:300px;overflow-y:auto;font-size:13px;" class="hidden"></div>
+        </div>
+
+        <!-- Archivos en db_uploads -->
+        <div class="card">
+            <h2>&#128196; Archivos en db_uploads/</h2>
+            <div class="file-list" id="fileList">
+                <p style="color:#888;">Cargando...</p>
+            </div>
+        </div>
+
+        <!-- Estado de Coneras -->
+        <div class="card">
+            <h2>&#127760; Estado de Coneras</h2>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:30px;"><input type="checkbox" id="checkAll" title="Seleccionar todas"></th>
+                            <th>Nombre</th>
+                            <th>Zona</th>
+                            <th>IP</th>
+                            <th>Ultimo Check-in</th>
+                            <th>Version</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="conerasTable">
+                        {% if coneras %}
+                            {% for c in coneras %}
+                            <tr>
+                                <td><input type="checkbox" class="conera-check" value="{{ c.name }}" data-zone="{{ c.zone }}"></td>
+                                <td><strong>{{ c.name }}</strong></td>
+                                <td><span class="zone-badge">{{ c.zone or '-' }}</span></td>
+                                <td>{{ c.ip or '-' }}</td>
+                                <td>{{ c.last_checkin[:16] if c.last_checkin else '-' }}</td>
+                                <td>{{ c.current_version or '-' }}</td>
+                                <td>
+                                    {% if c.status == 'actualizada' %}
+                                        <span class="badge badge-success">&#10003; Actualizada</span>
+                                    {% elif c.status == 'pendiente' %}
+                                        <span class="badge badge-warning">&#8987; Pendiente</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary">{{ c.status }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr><td colspan="7" style="text-align:center;color:#888;">No hay coneras registradas aun</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="card">
+            <h2>&#128214; Log del Servidor</h2>
+            <div class="log-area" id="logArea">
+                <div class="info">[Sistema] Panel iniciado. Esperando acciones...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            DBF SYNC v1.0 &mdash; Hecho para Coneras Aloha NCR
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // --- Upload zone ---
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const lblUploadStatus = document.getElementById('lblUploadStatus');
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => { uploadZone.classList.remove('dragover'); });
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) uploadFiles(e.target.files);
+        });
+
+        // Select all checkbox
+        document.getElementById('checkAll').addEventListener('change', function() {
+            document.querySelectorAll('.conera-check').forEach(cb => cb.checked = this.checked);
+        });
+
+        // Zones tracking
+        let allConeras = [];
+
+        function uploadFiles(files) {
+            const formData = new FormData();
+            let count = 0;
+            for (const f of files) {
+                if (f.name.toLowerCase().endsWith('.dbf')) { formData.append('files', f); count++; }
+            }
+            if (count === 0) { showToast('Solo se aceptan archivos .dbf', 'error'); return; }
+            lblUploadStatus.textContent = `Subiendo ${count} archivos...`;
+            fetch('/api/upload', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast(`${data.uploaded} archivos subidos`, 'success');
+                        lblUploadStatus.textContent = `${data.uploaded} archivos subidos`;
+                        loadFileList();
+                    } else {
+                        showToast(data.error || 'Error', 'error');
+                        lblUploadStatus.textContent = '';
+                    }
+                })
+                .catch(() => { showToast('Error de conexion', 'error'); lblUploadStatus.textContent = ''; });
+        }
+
+        // --- Create version ---
+        document.getElementById('btnCrearVersion').addEventListener('click', () => {
+            const btn = document.getElementById('btnCrearVersion');
+            btn.disabled = true; btn.textContent = 'Creando...';
+            setStatus('Creando nueva version...', '');
+            fetch('/api/create-version', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Version creada exitosamente', 'success');
+                        setStatus(`Version ${data.version.version} creada (${data.version.file_count} archivos)`, 'success');
+                        refreshAll();
+                        addLog(`Version creada: ${data.version.version} (${data.version.file_count} archivos, ${(data.version.total_size/1024).toFixed(1)} KB)`, 'info');
+                    } else {
+                        showToast(data.error || 'Error', 'error');
+                        setStatus(data.error, 'error');
+                    }
+                })
+                .catch(() => { showToast('Error de conexion', 'error'); setStatus('Error de conexion', 'error'); })
+                .finally(() => { btn.disabled = false; btn.textContent = 'Crear Version'; });
+        });
+
+        // --- Refresh ---
+        document.getElementById('btnRefresh').addEventListener('click', refreshAll);
+        document.getElementById('btnDownload').addEventListener('click', () => {});
+
+        // --- Get selected coneras ---
+        function getSelectedConeras() {
+            const checked = [];
+            document.querySelectorAll('.conera-check:checked').forEach(cb => checked.push(cb.value));
+            return checked;
+        }
+
+        function getZoneConeras(zone) {
+            if (zone === '__all__') return [];
+            return allConeras.filter(c => c.zone === zone || (!zone && !c.zone)).map(c => c.name);
+        }
+
+        // --- Force Update ---
+        function doForceUpdate(conerasList) {
+            const btn = event.target;
+            const action = document.getElementById('forceAction').value;
+            const status = document.getElementById('forceStatus');
+            const resultsDiv = document.getElementById('forceResults');
+            btn.disabled = true; btn.textContent = 'Enviando...';
+            status.textContent = 'Enviando orden a las coneras...';
+            resultsDiv.classList.add('hidden');
+            fetch('/api/force-update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action, coneras: conerasList})
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Orden enviada', 'success');
+                        const actionNames = {none: 'Solo actualizar', restart: 'Reiniciar POS', logoff: 'Cerrar sesion'};
+                        status.textContent = `Orden enviada: ${actionNames[action] || action}. Esperando respuestas...`;
+                        addLog(`Actualizacion forzada: version=${data.version}, action=${action}, coneras=${conerasList.length || 'todas'}`, 'info');
+                        pollResults();
+                    } else {
+                        showToast(data.error || 'Error', 'error');
+                        status.textContent = data.error || 'Error al enviar orden';
+                    }
+                })
+                .catch(() => { showToast('Error de conexion', 'error'); status.textContent = 'Error de conexion'; })
+                .finally(() => { btn.disabled = false; btn.textContent = conerasList.length ? 'Forzar en seleccionadas' : 'Forzar en TODAS'; });
+        }
+
+        document.getElementById('btnForceUpdate').addEventListener('click', (e) => {
+            const selected = getSelectedConeras();
+            if (selected.length === 0) {
+                // Use zone filter
+                const zone = document.getElementById('forceZone').value;
+                const zoneConeras = getZoneConeras(zone);
+                if (zoneConeras.length === 0) {
+                    showToast('No hay coneras en la zona seleccionada', 'error');
+                    return;
+                }
+                e.target.closest ? doForceUpdate.call({target: e.target}, zoneConeras) : doForceUpdate(zoneConeras);
+            } else {
+                e.target.closest ? doForceUpdate.call({target: e.target}, selected) : doForceUpdate(selected);
+            }
+        });
+
+        document.getElementById('btnForceAll').addEventListener('click', (e) => {
+            e.target.closest ? doForceUpdate.call({target: e.target}, []) : doForceUpdate([]);
+        });
+
+        function pollResults() {
+            let count = 0;
+            const iv = setInterval(() => {
+                fetch('/api/force-update-results')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.has_results) {
+                            loadConeras();
+                            const resultsDiv = document.getElementById('forceResults');
+                            const status = document.getElementById('forceStatus');
+                            const ok = data.results.filter(r => r.acknowledged).length;
+                            const fail = data.results.filter(r => !r.acknowledged).length;
+                            status.textContent = `Respuestas: ${ok} actualizadas, ${fail} pendientes`;
+                            resultsDiv.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+                                <tr style="background:#f0f0f0;"><th>Conera</th><th>Zona</th><th>Estado</th><th>Respuesta</th></tr>
+                                ${data.results.map(r => `<tr>
+                                    <td>${r.name}</td>
+                                    <td>${r.zone || '-'}</td>
+                                    <td>${r.acknowledged ? '&#9989; OK' : '&#8987; Pendiente'}</td>
+                                    <td>${r.ack_time ? r.ack_time.slice(11,19) : '-'}</td>
+                                </tr>`).join('')}
+                            </table>`;
+                            resultsDiv.classList.remove('hidden');
+                            if (count > 12 || ok + fail >= data.total) clearInterval(iv);
+                        }
+                        count++;
+                        if (count > 12) { clearInterval(iv); document.getElementById('forceStatus').textContent += ' (tiempo agotado)'; }
+                    })
+                    .catch(() => { count++; });
+            }, 10000);
+        }
+
+        // --- Functions ---
+        function refreshAll() { loadVersion(); loadConeras(); loadFileList(); }
+
+        function loadVersion() {
+            fetch('/api/version')
+                .then(r => r.json())
+                .then(v => {
+                    document.getElementById('verVersion').textContent = v.version || 'Ninguna';
+                    document.getElementById('verFiles').textContent = v.file_count || '0';
+                    document.getElementById('verSize').textContent = v.total_size ? (v.total_size / 1048576).toFixed(2) + ' MB' : '0 MB';
+                    document.getElementById('verDate').textContent = v.created_at ? v.created_at.slice(0, 16) : '-';
+                }).catch(() => {});
+        }
+
+        function loadConeras() {
+            fetch('/api/coneras')
+                .then(r => r.json())
+                .then(coneras => {
+                    allConeras = coneras;
+                    const tbody = document.getElementById('conerasTable');
+                    const zoneSelect = document.getElementById('forceZone');
+                    if (!coneras || coneras.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No hay coneras registradas</td></tr>';
+                        zoneSelect.innerHTML = '<option value="__all__">Todas las zonas</option>';
+                        return;
+                    }
+                    // Build zone list
+                    const zones = [...new Set(coneras.map(c => c.zone || 'Sin zona'))];
+                    zoneSelect.innerHTML = '<option value="__all__">Todas las zonas</option>' +
+                        zones.map(z => `<option value="${z === 'Sin zona' ? '' : z}">${z}</option>`).join('');
+
+                    tbody.innerHTML = coneras.map(c => {
+                        let badge = '';
+                        if (c.status === 'actualizada') badge = '<span class="badge badge-success">&#10003; Actualizada</span>';
+                        else if (c.status === 'pendiente') badge = '<span class="badge badge-warning">&#8987; Pendiente</span>';
+                        else badge = '<span class="badge badge-secondary">'+c.status+'</span>';
+                        const zone = c.zone || '-';
+                        return `<tr>
+                            <td><input type="checkbox" class="conera-check" value="${c.name}" data-zone="${c.zone}"></td>
+                            <td><strong>${c.name}</strong></td>
+                            <td>${zone}</td>
+                            <td>${c.ip || '-'}</td>
+                            <td>${c.last_checkin ? c.last_checkin.slice(0, 16) : '-'}</td>
+                            <td>${c.current_version || '-'}</td>
+                            <td>${badge}</td>
+                        </tr>`;
+                    }).join('');
+                }).catch(() => {});
+        }
+
+        function loadFileList() {
+            fetch('/api/version')
+                .then(r => r.json())
+                .then(v => {
+                    const fl = document.getElementById('fileList');
+                    fl.innerHTML = v.file_count > 0
+                        ? `<p style="color:#888;">${v.file_count} archivo(s) en la ultima version (${(v.total_size/1048576).toFixed(2)} MB)</p>`
+                        : '<p style="color:#888;">No hay archivos .dbf en db_uploads/</p>';
+                }).catch(() => {});
+        }
+
+        function setStatus(msg, type) {
+            const bar = document.getElementById('statusBar');
+            bar.textContent = msg;
+            bar.className = 'status-bar' + (type ? ' ' + type : '');
+            bar.classList.remove('hidden');
+            if (type) setTimeout(() => bar.classList.add('hidden'), 5000);
+        }
+
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            t.textContent = msg; t.className = 'toast ' + type;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+
+        function addLog(msg, type) {
+            const area = document.getElementById('logArea');
+            const div = document.createElement('div');
+            div.className = type || 'info';
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            area.appendChild(div);
+            area.scrollTop = area.scrollHeight;
+        }
+
+        setInterval(loadConeras, 30000);
+        setInterval(loadVersion, 30000);
+        refreshAll();
+        addLog('Panel iniciado - con zonas, seleccion multiple y resultados', 'info');
+    </script>
+</body>
+</html>

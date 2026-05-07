@@ -1,0 +1,192 @@
+============================================
+  DBF SYNC v1.0 - GUIA DE INSTALACION
+  Sincronizacion de archivos DBF a Coneras
+============================================
+
+REQUISITOS:
+- Esta PC con Windows 10/11
+- Coneras con Windows XP, 7 o 10
+- Internet en todas las coneras (claro/tigo)
+- cloudflared.exe incluido en la carpeta
+
+
+--------------------------------------------
+PARTE 1 - INICIAR EL SERVIDOR (ESTA PC)
+--------------------------------------------
+
+1. Haga doble clic en "inicio-servidor.bat"
+
+2. Se abrira una ventana que muestra:
+   =============================================
+     DBF SYNC SERVER v1.0
+   =============================================
+     [1/3] Iniciando servidor Flask...
+     [2/3] Iniciando tunnel Cloudflare...
+
+3. Espere a que aparezca el mensaje:
+     +---------------------------------------------+
+     |  Your quick Tunnel has been created!        |
+     |  https://algo.trycloudflare.com              |
+     +---------------------------------------------+
+
+4. COPIE ESA URL (la de trycloudflare.com)
+   La va a necesitar para las coneras
+
+5. Abra el navegador en http://localhost:8080
+   para ver el panel de control
+
+
+--------------------------------------------
+PARTE 2 - USAR EL PANEL WEB
+--------------------------------------------
+
+Cuando abra http://localhost:8080 en su navegador:
+
+1. Subir archivos .dbf:
+   - Arrastre los .dbf a la zona punteada
+   - O haga clic y seleccione los archivos
+
+2. Crear Version:
+   - Despues de subir los .dbf
+   - Haga clic en "Crear Version"
+   - Esto comprime y deja disponible para las coneras
+
+3. Forzar actualizacion en coneras:
+   - Seleccione las coneras (checkboxes) o filtre por zona
+   - Elija accion:
+     * "Solo actualizar archivos" - copia los .dbf nomas
+     * "Actualizar y reiniciar POS" - copia y reabre IBERQS
+     * "Actualizar y cerrar sesion" - copia y hace logoff
+   - Click "Forzar en seleccionadas" o "Forzar en TODAS"
+   - El panel muestra resultados en vivo (quien ya actualizo)
+
+4. Asignar zonas a las coneras:
+   - Cada conera que se registra aparece en la tabla
+   - Se puede filtrar por zona al forzar actualizacion
+   - Las zonas se asignan via la tabla de coneras
+
+5. Panel muestra:
+   - Version actual (numero, archivos, tamano, fecha)
+   - Lista de coneras conectadas con estado
+   - Estado de cada una (actualizada/pendiente)
+
+
+--------------------------------------------
+PARTE 3 - CONFIGURAR CADA CONERA
+--------------------------------------------
+
+A. Para CONERAS Windows 7 o 10:
+
+   1. Copie estos 2 archivos a la conera:
+      - dbf-sync-client.exe
+      - client/sync-config.json
+
+   2. EDITE sync-config.json con:
+
+      {
+        "server_url": "https://[URL-DEL-TUNNEL]",
+        "conera_name": "NOMBRE-DE-ESTA-CONERA",
+        "check_interval": 300,
+        "data_dir": "C:\\Bootdrv\\AlohaQs\\DATA",
+        "newdata_dir": "C:\\Bootdrv\\AlohaQs\\NEWDATA",
+        "iberqs_path": "C:\\BootDrv\\AlohaQS\\BIN\\IBERQS.exe",
+        "version_file": "C:\\Bootdrv\\AlohaQs\\version.txt",
+        "log_file": "C:\\Bootdrv\\AlohaQs\\sync-log.txt",
+        "retry_attempts": 5,
+        "retry_delay": 30
+      }
+
+      CAMBIE:
+      - [URL-DEL-TUNNEL]: la URL que copio del tunnel
+        (ej: https://algo.trycloudflare.com)
+      - "conera_name": el nombre de la conera (K135, K137, etc.)
+
+   3. Ejecute dbf-sync-client.exe
+      - Corre en segundo plano (sin ventana)
+      - Cada 5 minutos revisa si hay nueva version
+
+   4. Para que inicie automaticamente con Windows:
+      - Cree acceso directo a dbf-sync-client.exe
+      - Peguelo en Inicio > Ejecutar > shell:startup
+
+
+B. Para CONERAS Windows XP:
+
+   1. Copie estos 2 archivos a la conera:
+      - client/dbf-sync-client-xp.vbs
+      - client/sync-config.txt
+
+   2. EDITE sync-config.txt con bloc de notas:
+
+      server_url=https://[URL-DEL-TUNNEL]
+      conera_name=NOMBRE-DE-LA-CONERA
+
+      CAMBIE:
+      - [URL-DEL-TUNNEL]: la URL que copio del tunnel
+      - NOMBRE-DE-LA-CONERA: ej. K135, K137, etc.
+
+   3. Para ejecutarlo:
+      Haga doble clic en dbf-sync-client-xp.vbs
+      O use el batch K135-iniciar-sync.bat (si existe)
+      (NO se abre ventana si se ejecuta con wscript.exe)
+
+   4. Para que inicie con Windows XP:
+      - Cree acceso directo al .vbs
+      - Peguelo en:
+        C:\Documents and Settings\[USUARIO]\Menu Inicio\Programas\Inicio
+
+
+--------------------------------------------
+PARTE 4 - FLUJO DE TRABAJO DIARIO
+--------------------------------------------
+
+1. Hace cambios en SQL / Aloha Manager
+2. Saca los .dbf actualizados
+3. Los sube por el panel web (drag & drop)
+4. En el panel web http://localhost:8080, haga clic en "Crear Version"
+5. Las coneras se actualizan solas en los proximos 5-10 minutos
+6. Opcional: use "Forzar actualizacion" si necesita actualizar YA
+7. El panel muestra el estado de cada conera en vivo
+
+
+--------------------------------------------
+PARTE 5 - ACTUALIZAR EL CLIENTE EN UNA CONERA
+--------------------------------------------
+
+Cuando actualice el servidor (nuevo sync-server.py), tambien
+debe actualizar el cliente en las coneras:
+
+1. Para coneras Win7/10: copiar nuevo dbf-sync-client.exe
+2. Para coneras XP: copiar nuevo dbf-sync-client-xp.vbs
+3. Matar el proceso anterior y reiniciar el cliente
+
+
+--------------------------------------------
+NOTAS IMPORTANTES
+--------------------------------------------
+
+- Si esta PC se reinicia:
+  1. Ejecute inicio-servidor.bat de nuevo
+  2. Copie la NUEVA URL del tunnel
+  3. Conectese por AnyDesk/Radmin a las coneras REMOTAS
+  4. Cambie la URL en sync-config.json (o .vbs)
+  (Esto pasa solo si reinicia esta PC)
+
+- Las coneras en RED LOCAL pueden conectarse directo
+  a http://192.168.200.71:8080 sin tunnel
+
+- La URL del tunnel CAMBIA cada vez que reinicia el servidor.
+  Las coneras van a tener URL vieja y no van a poder
+  conectarse hasta que la actualice.
+
+- Problemas? Revise sync-log.txt en la conera:
+  C:\Bootdrv\AlohaQs\sync-log.txt
+
+- Si una conera queda colgada (nunca actualiza):
+  1. Revise que tenga internet
+  2. Revise que la URL del tunnel sea la correcta
+  3. Use "Forzar actualizacion" desde el panel
+  4. Como ultimo recurso, actualice manual via AnyDesk
+
+- Los archivos force-applied.txt y version.txt se crean
+  automaticamente en C:\Bootdrv\AlohaQs\. No los borre.

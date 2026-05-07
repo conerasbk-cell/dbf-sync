@@ -1,0 +1,12 @@
+{
+    "server_url": "https://URL-DEL-TUNNEL.trycloudflare.com",
+    "conera_name": "NOMBRE-DE-LA-CONERA",
+    "check_interval": 300,
+    "data_dir": "C:\\Bootdrv\\AlohaQs\\DATA",
+    "newdata_dir": "C:\\Bootdrv\\AlohaQs\\NEWDATA",
+    "iberqs_path": "C:\\BootDrv\\AlohaQS\\BIN\\IBERQS.exe",
+    "version_file": "C:\\Bootdrv\\AlohaQs\\version.txt",
+    "log_file": "C:\\Bootdrv\\AlohaQs\\sync-log.txt",
+    "retry_attempts": 5,
+    "retry_delay": 30
+}

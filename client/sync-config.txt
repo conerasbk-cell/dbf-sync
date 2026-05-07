@@ -1,0 +1,2 @@
+server_url=https://ejemplo.trycloudflare.com
+conera_name=NOMBRE-DE-LA-CONERA
