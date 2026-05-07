@@ -136,6 +136,26 @@
             </div>
         </div>
 
+        <!-- Historial de Versiones -->
+        <div class="card">
+            <h2>&#128214; Historial de Versiones</h2>
+            <div style="max-height:250px;overflow-y:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Version</th>
+                            <th>Fecha</th>
+                            <th>Archivos</th>
+                            <th>Tamaño</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTable">
+                        <tr><td colspan="4" style="text-align:center;color:#888;">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Estado de Coneras -->
         <div class="card">
             <h2>&#127760; Estado de Coneras</h2>
@@ -176,6 +196,26 @@
                         {% else %}
                             <tr><td colspan="7" style="text-align:center;color:#888;">No hay coneras registradas aun</td></tr>
                         {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Registro de Check-ins -->
+        <div class="card">
+            <h2>&#128339; Registro de Actualizaciones</h2>
+            <div style="max-height:250px;overflow-y:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Conera</th>
+                            <th>Zona</th>
+                            <th>Version</th>
+                            <th>Ultimo Check-in</th>
+                        </tr>
+                    </thead>
+                    <tbody id="checkinLogTable">
+                        <tr><td colspan="4" style="text-align:center;color:#888;">Cargando...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -367,7 +407,7 @@
         }
 
         // --- Functions ---
-        function refreshAll() { loadVersion(); loadConeras(); loadFileList(); }
+        function refreshAll() { loadVersion(); loadConeras(); loadFileList(); loadVersionHistory(); loadCheckinLog(); }
 
         function loadVersion() {
             fetch('/api/version')
@@ -424,6 +464,42 @@
                     fl.innerHTML = v.file_count > 0
                         ? `<p style="color:#888;">${v.file_count} archivo(s) en la ultima version (${(v.total_size/1048576).toFixed(2)} MB)</p>`
                         : '<p style="color:#888;">No hay archivos .dbf en db_uploads/</p>';
+                }).catch(() => {});
+        }
+
+        function loadVersionHistory() {
+            fetch('/api/versions')
+                .then(r => r.json())
+                .then(versions => {
+                    const tbody = document.getElementById('historyTable');
+                    if (!versions || versions.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#888;">No hay versiones creadas aun</td></tr>';
+                        return;
+                    }
+                    tbody.innerHTML = versions.map(v => `<tr>
+                        <td><strong>${v.version}</strong></td>
+                        <td>${v.created_at ? v.created_at.slice(0, 16) : '-'}</td>
+                        <td>${v.file_count}</td>
+                        <td>${v.total_size ? (v.total_size / 1048576).toFixed(2) + ' MB' : '0 MB'}</td>
+                    </tr>`).join('');
+                }).catch(() => {});
+        }
+
+        function loadCheckinLog() {
+            fetch('/api/conera/checkin-log')
+                .then(r => r.json())
+                .then(logs => {
+                    const tbody = document.getElementById('checkinLogTable');
+                    if (!logs || logs.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#888;">Sin actividad aun</td></tr>';
+                        return;
+                    }
+                    tbody.innerHTML = logs.map(l => `<tr>
+                        <td><strong>${l.name}</strong></td>
+                        <td>${l.zone || '-'}</td>
+                        <td>${l.version || '-'}</td>
+                        <td>${l.time ? l.time.slice(0, 16) : '-'}</td>
+                    </tr>`).join('');
                 }).catch(() => {});
         }
 

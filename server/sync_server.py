@@ -181,6 +181,36 @@ def api_version():
         return jsonify(v)
     return jsonify({"version": "ninguna", "created_at": "", "file_count": 0, "total_size": 0})
 
+@app.route("/api/versions")
+def api_versions():
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute("SELECT version, created_at, file_count, total_size, checksum FROM versions ORDER BY id DESC LIMIT 50")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([
+        {
+            "version": r[0],
+            "created_at": r[1],
+            "file_count": r[2],
+            "total_size": r[3],
+            "checksum": r[4],
+        }
+        for r in rows
+    ])
+
+@app.route("/api/conera/checkin-log")
+def api_conera_checkin_log():
+    conn = sqlite3.connect(str(DB_PATH))
+    c = conn.cursor()
+    c.execute("SELECT name, last_checkin, current_version, zone FROM coneras WHERE last_checkin IS NOT NULL ORDER BY last_checkin DESC LIMIT 50")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([
+        {"name": r[0], "time": r[1], "version": r[2], "zone": r[3]}
+        for r in rows
+    ])
+
 @app.route("/api/download")
 def api_download():
     v = get_current_version()
