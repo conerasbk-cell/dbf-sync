@@ -143,10 +143,16 @@ def get_coneras_list():
     c.execute("SELECT name, ip, zone, last_checkin, current_version, status FROM coneras ORDER BY zone, name")
     rows = c.fetchall()
     conn.close()
-    return [
-        {"name": r[0], "ip": r[1], "zone": r[2], "last_checkin": r[3], "current_version": r[4], "status": r[5]}
-        for r in rows
-    ]
+    ten_min_ago = datetime.now().isoformat(timespec="seconds")[:19]
+    result = []
+    for r in rows:
+        online = bool(r[3]) and r[3][:19] >= ten_min_ago
+        result.append({
+            "name": r[0], "ip": r[1], "zone": r[2],
+            "last_checkin": r[3], "current_version": r[4], "status": r[5],
+            "online": online,
+        })
+    return result
 
 def register_conera(name, ip, version, zone=""):
     conn = sqlite3.connect(str(DB_PATH))

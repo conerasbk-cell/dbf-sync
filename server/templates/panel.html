@@ -164,6 +164,7 @@
                     <thead>
                         <tr>
                             <th style="width:30px;"><input type="checkbox" id="checkAll" title="Seleccionar todas"></th>
+                            <th style="width:25px;">En linea</th>
                             <th>Nombre</th>
                             <th>Zona</th>
                             <th>IP</th>
@@ -177,6 +178,7 @@
                             {% for c in coneras %}
                             <tr>
                                 <td><input type="checkbox" class="conera-check" value="{{ c.name }}" data-zone="{{ c.zone }}"></td>
+                                <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ '#28a745' if c.online else '#dc3545' }};" title="{{ 'En linea' if c.online else 'Desconectado' }}"></span></td>
                                 <td><strong>{{ c.name }}</strong></td>
                                 <td><span class="zone-badge">{{ c.zone or '-' }}</span></td>
                                 <td>{{ c.ip or '-' }}</td>
@@ -194,7 +196,7 @@
                             </tr>
                             {% endfor %}
                         {% else %}
-                            <tr><td colspan="7" style="text-align:center;color:#888;">No hay coneras registradas aun</td></tr>
+                            <tr><td colspan="8" style="text-align:center;color:#888;">No hay coneras registradas aun</td></tr>
                         {% endif %}
                     </tbody>
                 </table>
@@ -434,7 +436,7 @@
                     const tbody = document.getElementById('conerasTable');
                     const zoneSelect = document.getElementById('forceZone');
                     if (!coneras || coneras.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No hay coneras registradas</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;">No hay coneras registradas</td></tr>';
                         zoneSelect.innerHTML = '<option value="__all__">Todas las zonas</option>';
                         return;
                     }
@@ -449,8 +451,12 @@
                         else if (c.status === 'pendiente') badge = '<span class="badge badge-warning">&#8987; Pendiente</span>';
                         else badge = '<span class="badge badge-secondary">'+c.status+'</span>';
                         const zone = c.zone || '-';
+                        const dot = c.online
+                            ? '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#28a745;" title="En linea"></span>'
+                            : '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#dc3545;" title="Desconectado"></span>';
                         return `<tr>
                             <td><input type="checkbox" class="conera-check" value="${c.name}" data-zone="${c.zone}"></td>
+                            <td>${dot}</td>
                             <td><strong>${c.name}</strong></td>
                             <td>${zone}</td>
                             <td>${c.ip || '-'}</td>
