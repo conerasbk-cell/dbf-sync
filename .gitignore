@@ -2,7 +2,6 @@
 cloudflared.exe
 build/
 dist/
-zips/
 *.spec
 __pycache__/
 *.pyc

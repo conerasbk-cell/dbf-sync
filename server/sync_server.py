@@ -180,7 +180,7 @@ def index():
     coneras = get_coneras_list()
     return render_template("panel.html", version=version, coneras=coneras)
 
-@app.route("/api/version")
+@app.route("/api/version", methods=["GET", "POST"])
 def api_version():
     v = get_current_version()
     if v:
@@ -217,7 +217,7 @@ def api_conera_checkin_log():
         for r in rows
     ])
 
-@app.route("/api/download")
+@app.route("/api/download", methods=["GET", "POST"])
 def api_download():
     v = get_current_version()
     if not v:
@@ -305,9 +305,11 @@ def api_force_update():
     logging.info(f"Actualizacion forzada: version={v['version']}, action={action}, coneras={len(selected)}")
     return jsonify({"success": True, "version": v["version"], "action": action})
 
-@app.route("/api/force-update-status")
+@app.route("/api/force-update-status", methods=["GET", "POST"])
 def api_force_update_status():
     conera_name = request.args.get("conera_name", "")
+    if not conera_name and request.json:
+        conera_name = request.json.get("conera_name", "")
     conn = sqlite3.connect(str(DB_PATH))
     c = conn.cursor()
     c.execute("SELECT version, action, created_at, acks FROM force_update ORDER BY id DESC LIMIT 1")

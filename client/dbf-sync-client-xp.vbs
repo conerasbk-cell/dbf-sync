@@ -169,12 +169,12 @@ End Sub
 Function CreateHttp()
     Dim obj
     On Error Resume Next
-    Set obj = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    Set obj = CreateObject("MSXML2.XMLHTTP.3.0")
     If Err.Number <> 0 Then
-        Set obj = CreateObject("WinHttp.WinHttpRequest.5.1")
+        Set obj = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     End If
     If Err.Number <> 0 Then
-        Set obj = CreateObject("MSXML2.XMLHTTP.3.0")
+        Set obj = CreateObject("WinHttp.WinHttpRequest.5.1")
     End If
     On Error Goto 0
     Set CreateHttp = obj
@@ -188,6 +188,7 @@ Function HttpGet(url)
     http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
     http.Send
     If Err.Number <> 0 Then
+        LogError "HttpGet error: " & Err.Description & " (url: " & url & ")"
         HttpGet = ""
         Exit Function
     End If
@@ -195,6 +196,7 @@ Function HttpGet(url)
     If http.Status = 200 Then
         HttpGet = http.ResponseText
     Else
+        LogError "HttpGet status: " & http.Status & " (url: " & url & ")"
         HttpGet = ""
     End If
 End Function
@@ -225,20 +227,45 @@ Function HttpGetJsonBool(jsonText, key)
     End If
 End Function
 
-Function HttpGetBinary(url, savePath)
+Function HttpPostJson(url, jsonData)
+    Dim http
+    Set http = CreateHttp()
+    On Error Resume Next
+    http.Open "POST", url, False
+    http.SetRequestHeader "Content-Type", "application/json"
+    http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+    http.Send jsonData
+    If Err.Number <> 0 Then
+        LogError "HttpPostJson error: " & Err.Description & " (url: " & url & ")"
+        HttpPostJson = ""
+        Exit Function
+    End If
+    On Error Goto 0
+    If http.Status = 200 Then
+        HttpPostJson = http.ResponseText
+    Else
+        LogError "HttpPostJson status: " & http.Status & " (url: " & url & ")"
+        HttpPostJson = ""
+    End If
+End Function
+
+Function HttpPostBinary(url, jsonData, savePath)
     Dim http, ado
     Set http = CreateHttp()
     On Error Resume Next
-    http.Open "GET", url, False
+    http.Open "POST", url, False
+    http.SetRequestHeader "Content-Type", "application/json"
     http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
-    http.Send
+    http.Send jsonData
     If Err.Number <> 0 Then
-        HttpGetBinary = False
+        LogError "HttpPostBinary error: " & Err.Description & " (url: " & url & ")"
+        HttpPostBinary = False
         Exit Function
     End If
     On Error Goto 0
     If http.Status <> 200 Then
-        HttpGetBinary = False
+        LogError "HttpPostBinary status: " & http.Status & " (url: " & url & ")"
+        HttpPostBinary = False
         Exit Function
     End If
     Set ado = CreateObject("ADODB.Stream")
@@ -247,7 +274,7 @@ Function HttpGetBinary(url, savePath)
     ado.Write http.ResponseBody
     ado.SaveToFile savePath, 2
     ado.Close
-    HttpGetBinary = True
+    HttpPostBinary = True
 End Function
 
 Sub ExtractZip(zipPath, destPath)
@@ -303,7 +330,7 @@ Function DownloadAndInstall(bForce)
     Dim downloadUrl, tmpDir, tmpZip, extractDir
 
     versionUrl = strServerUrl & "/api/version"
-    versionResponse = HttpGet(versionUrl)
+    versionResponse = HttpPostJson(versionUrl, "{}")
     If versionResponse = "" Then
         LogError "No se pudo conectar al servidor"
         DownloadAndInstall = False
@@ -334,7 +361,7 @@ Function DownloadAndInstall(bForce)
     tmpDir = fso.GetSpecialFolder(2)
     tmpZip = tmpDir & "\dbf_sync_" & serverVersion & ".zip"
 
-    If Not HttpGetBinary(downloadUrl, tmpZip) Then
+    If Not HttpPostBinary(downloadUrl, "{}", tmpZip) Then
         LogError "Error al descargar"
         DownloadAndInstall = False
         Exit Function
@@ -360,8 +387,7 @@ End Function
 
 Function CheckForceUpdate()
     Dim url, resp, forceActive, forceAction, forceVersion, downloaded
-    url = strServerUrl & "/api/force-update-status?conera_name=" & strConeraName
-    resp = HttpGet(url)
+    resp = HttpPostJson(strServerUrl & "/api/force-update-status", "{""conera_name"":""" & strConeraName & """}")
     If resp = "" Then
         CheckForceUpdate = False
         Exit Function
