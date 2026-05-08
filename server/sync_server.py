@@ -34,17 +34,52 @@ logging.basicConfig(
 )
 
 # --- DB connection ---
+_turso_db_url = None
+_turso_db_token = None
+
+def _init_turso_from_env():
+    global _turso_db_url, _turso_db_token
+    url = os.environ.get("TURSO_DATABASE_URL", "")
+    token = os.environ.get("TURSO_AUTH_TOKEN", "")
+    if url and token:
+        if url.startswith("libsql://"):
+            url = "https://" + url[8:]
+        _turso_db_url = url
+        _turso_db_token = token
+
 def get_db_connection():
-    turso_url = os.environ.get("TURSO_DATABASE_URL")
-    turso_token = os.environ.get("TURSO_AUTH_TOKEN")
-    if turso_url and turso_token:
-        import libsql
-        return libsql.connect(database=turso_url, auth_token=turso_token)
+    if _turso_db_url and _turso_db_token:
+        import threading
+        result = [None]
+        exc = [None]
+        done = threading.Event()
+
+        def _connect():
+            try:
+                import libsql
+                result[0] = libsql.connect(database=_turso_db_url, auth_token=_turso_db_token)
+            except Exception as e:
+                exc[0] = e
+            finally:
+                done.set()
+
+        t = threading.Thread(target=_connect, daemon=True)
+        t.start()
+        if not done.wait(timeout=8):
+            logging.warning("Turso connection timed out (8s), using local SQLite")
+            return _sqlite_conn()
+        if exc[0]:
+            logging.error(f"Turso connection failed: {exc[0]}, using local SQLite")
+            return _sqlite_conn()
+        return result[0]
+    return _sqlite_conn()
+
+def _sqlite_conn():
     import sqlite3
-    DB_PATH = BASE_DIR / "sync.db"
-    return sqlite3.connect(str(DB_PATH))
+    return sqlite3.connect(str(BASE_DIR / "sync.db"))
 
 def init_db():
+    _init_turso_from_env()
     conn = get_db_connection()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS versions (
