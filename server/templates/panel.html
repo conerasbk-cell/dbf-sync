@@ -180,7 +180,7 @@
                                 <td><input type="checkbox" class="conera-check" value="{{ c.name }}" data-zone="{{ c.zone }}"></td>
                                 <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ '#28a745' if c.online else '#dc3545' }};" title="{{ 'En linea' if c.online else 'Desconectado' }}"></span></td>
                                 <td><strong>{{ c.name }}</strong></td>
-                                <td><span class="zone-badge">{{ c.zone or '-' }}</span></td>
+                                <td><span class="zone-badge" onclick="editZone(this, '{{ c.name }}')" style="cursor:pointer;border-bottom:1px dashed #aaa;" title="Click para editar zona">{{ c.zone or '-' }}</span></td>
                                 <td>{{ c.ip or '-' }}</td>
                                 <td>{{ c.last_checkin[:16] if c.last_checkin else '-' }}</td>
                                 <td>{{ c.current_version or '-' }}</td>
@@ -458,7 +458,7 @@
                             <td><input type="checkbox" class="conera-check" value="${c.name}" data-zone="${c.zone}"></td>
                             <td>${dot}</td>
                             <td><strong>${c.name}</strong></td>
-                            <td>${zone}</td>
+                            <td><span onclick="editZone(this, '${c.name}')" style="cursor:pointer;border-bottom:1px dashed #aaa;" title="Click para editar zona">${zone}</span></td>
                             <td>${c.ip || '-'}</td>
                             <td>${fmtDate(c.last_checkin)}</td>
                             <td>${c.current_version || '-'}</td>
@@ -537,6 +537,48 @@
             div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
             area.appendChild(div);
             area.scrollTop = area.scrollHeight;
+        }
+
+        // --- Edit Zone ---
+        function editZone(el, name) {
+            const current = el.textContent.trim();
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = current === '-' ? '' : current;
+            input.style.width = '100px';
+            input.style.padding = '4px 8px';
+            input.style.border = '1px solid #1a73e8';
+            input.style.borderRadius = '4px';
+            input.style.fontSize = '13px';
+            el.textContent = '';
+            el.appendChild(input);
+            input.focus();
+            input.select();
+            const save = () => {
+                const val = input.value.trim();
+                fetch('/api/conera/update-zone', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name, zone: val})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        el.textContent = val || '-';
+                        showToast('Zona actualizada: ' + name, 'success');
+                        loadConeras();
+                    } else {
+                        showToast('Error', 'error');
+                        el.textContent = current;
+                    }
+                }).catch(() => {
+                    showToast('Error de conexion', 'error');
+                    el.textContent = current;
+                });
+            };
+            input.addEventListener('blur', save);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { input.blur(); }
+                if (e.key === 'Escape') { el.textContent = current; }
+            });
         }
 
         setInterval(loadConeras, 30000);
