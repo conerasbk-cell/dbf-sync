@@ -70,19 +70,22 @@ class _TursoConn:
     def close(self):
         pass
 
-_turso = [None]
+_turso_conn = [None]
 _turso_last_error = [""]
-_turso_env_url = ""
-_turso_env_token = ""
+_turso_url = ""
+_turso_token = ""
 
-def _init_turso_env():
-    global _turso_env_url, _turso_env_token
-    _turso_env_url = os.environ.get("TURSO_DATABASE_URL", "")
-    _turso_env_token = os.environ.get("TURSO_AUTH_TOKEN", "")
-    if _turso_env_url.startswith("libsql://"):
-        _turso_env_url = "https://" + _turso_env_url[8:]
+def _load_turso_env():
+    global _turso_url, _turso_token
+    u = os.environ.get("TURSO_DATABASE_URL", "")
+    t = os.environ.get("TURSO_AUTH_TOKEN", "")
+    if u and t:
+        if u.startswith("libsql://"):
+            u = "https://" + u[8:]
+        _turso_url = u
+        _turso_token = t
 
-def _turso_ensure_tables(c):
+def _ensure_turso_tables(c):
     for sql in [
         "CREATE TABLE IF NOT EXISTS versions (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, created_at TEXT NOT NULL, file_count INTEGER DEFAULT 0, total_size INTEGER DEFAULT 0, checksum TEXT)",
         "CREATE TABLE IF NOT EXISTS coneras (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ip TEXT, zone TEXT DEFAULT '', last_checkin TEXT, current_version TEXT, status TEXT DEFAULT 'pendiente')",
@@ -93,39 +96,33 @@ def _turso_ensure_tables(c):
         except Exception:
             pass
 
-def _try_turso_once():
-    if not _turso_env_url or not _turso_env_token:
-        return None
+def _try_turso():
+    if not _turso_url or not _turso_token:
+        return False
     try:
-        c = _TursoConn(_turso_env_url, _turso_env_token)
+        c = _TursoConn(_turso_url, _turso_token)
         c.execute("SELECT 1").fetchall()
-        _turso_ensure_tables(c)
-        _turso[0] = c
+        _ensure_turso_tables(c)
+        _turso_conn[0] = c
+        _turso_last_error[0] = ""
         logging.info("Turso connected OK")
-        return c
+        return True
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"
         _turso_last_error[0] = msg
         logging.warning(f"Turso unavailable: {msg}")
-        return None
-
-def _turso_retry_loop():
-    while True:
-        if _turso[0] is not None:
-            return
-        _try_turso_once()
-        if _turso[0] is not None:
-            return
-        time.sleep(60)
+        return False
 
 def get_db_connection():
-    if _turso[0] is not None:
-        return _turso[0]
+    if _turso_conn[0] is not None:
+        return _turso_conn[0]
+    if _turso_url and _turso_token and _try_turso():
+        return _turso_conn[0]
     import sqlite3
     return sqlite3.connect(str(BASE_DIR / "sync.db"))
 
 def init_db():
-    _init_turso_env()
+    _load_turso_env()
     import sqlite3
     conn = sqlite3.connect(str(BASE_DIR / "sync.db"))
     conn.execute("""
@@ -166,11 +163,6 @@ def init_db():
     conn.close()
 
 init_db()
-
-# Try Turso in background, retry every 60s until connected
-import threading
-t = threading.Thread(target=_turso_retry_loop, daemon=True)
-t.start()
 
 # --- Helpers ---
 def get_current_version():
@@ -475,12 +467,10 @@ def api_upload():
 
 @app.route("/api/test-turso")
 def api_test_turso():
-    url = _turso_env_url
-    token = _turso_env_token
-    if not url or not token:
+    if not _turso_url or not _turso_token:
         return jsonify({"ok": False, "error": "Turso not configured"})
     try:
-        c = _TursoConn(url, token)
+        c = _TursoConn(_turso_url, _turso_token)
         r = c.execute("SELECT 1").fetchall()
         return jsonify({"ok": True, "rows": r})
     except Exception as e:
@@ -489,11 +479,10 @@ def api_test_turso():
 @app.route("/api/diagnostic")
 def api_diagnostic():
     return jsonify({
-        "turso_connected": _turso[0] is not None,
-        "turso_url_configured": bool(_turso_env_url),
-        "turso_token_configured": bool(_turso_env_token),
+        "turso_connected": _turso_conn[0] is not None,
+        "turso_url_configured": bool(_turso_url),
+        "turso_token_configured": bool(_turso_token),
         "turso_last_error": _turso_last_error[0],
-        "using_turso": _turso[0] is not None,
     })
 
 if __name__ == "__main__":
