@@ -72,6 +72,7 @@ class _TursoConn:
         pass
 
 _turso = [None]
+_turso_last_error = [""]
 _turso_env_url = ""
 _turso_env_token = ""
 
@@ -104,7 +105,9 @@ def _try_turso_once():
         logging.info("Turso connected OK")
         return c
     except Exception as e:
-        logging.warning(f"Turso unavailable: {e}")
+        msg = f"{type(e).__name__}: {e}"
+        _turso_last_error[0] = msg
+        logging.warning(f"Turso unavailable: {msg}")
         return None
 
 def _turso_retry_loop():
@@ -477,6 +480,8 @@ def api_diagnostic():
         "turso_connected": _turso[0] is not None,
         "turso_url_configured": bool(_turso_env_url),
         "turso_token_configured": bool(_turso_env_token),
+        "turso_last_error": _turso_last_error[0],
+        "using_turso": _turso[0] is not None,
     })
 
 if __name__ == "__main__":
