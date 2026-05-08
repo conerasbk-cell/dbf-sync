@@ -51,15 +51,7 @@ class _TursoConn:
         import json, urllib.request
         stmt = {"sql": sql}
         if params:
-            args = []
-            for p in params:
-                if isinstance(p, int):
-                    args.append({"value": {"type": "integer", "value": str(p)}})
-                elif isinstance(p, float):
-                    args.append({"value": {"type": "real", "value": str(p)}})
-                else:
-                    args.append({"value": {"type": "text", "value": str(p)}})
-            stmt["args"] = args
+            stmt["args"] = [{"value": {"type": "text", "value": str(p)}} for p in params]
         payload = json.dumps({"requests": [{"type": "execute", "stmt": stmt}, {"type": "close"}]}).encode()
         req = urllib.request.Request(
             self._url, data=payload,
