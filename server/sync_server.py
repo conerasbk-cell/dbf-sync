@@ -5,7 +5,7 @@ import shutil
 import hashlib
 import zipfile
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Thread
 from pathlib import Path
 
@@ -146,7 +146,7 @@ def get_coneras_list():
     conn = get_db_connection()
     rows = conn.execute("SELECT name, ip, zone, last_checkin, current_version, status FROM coneras ORDER BY zone, name").fetchall()
     conn.close()
-    ten_min_ago = datetime.now().isoformat(timespec="seconds")[:19]
+    ten_min_ago = (datetime.now() - timedelta(minutes=10)).isoformat(timespec="seconds")[:19]
     result = []
     for r in rows:
         online = bool(r[3]) and r[3][:19] >= ten_min_ago
