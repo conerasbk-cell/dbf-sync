@@ -71,33 +71,50 @@ class _TursoConn:
     def close(self):
         pass
 
-_turso = [None]  # mutable so _try_turso can update it
+_turso = [None]
+_turso_env_url = ""
+_turso_env_token = ""
 
-def _try_turso():
-    url = os.environ.get("TURSO_DATABASE_URL", "")
-    token = os.environ.get("TURSO_AUTH_TOKEN", "")
-    if url and token:
-        if url.startswith("libsql://"):
-            url = "https://" + url[8:]
+def _init_turso_env():
+    global _turso_env_url, _turso_env_token
+    _turso_env_url = os.environ.get("TURSO_DATABASE_URL", "")
+    _turso_env_token = os.environ.get("TURSO_AUTH_TOKEN", "")
+    if _turso_env_url.startswith("libsql://"):
+        _turso_env_url = "https://" + _turso_env_url[8:]
+
+def _turso_ensure_tables(c):
+    for sql in [
+        "CREATE TABLE IF NOT EXISTS versions (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, created_at TEXT NOT NULL, file_count INTEGER DEFAULT 0, total_size INTEGER DEFAULT 0, checksum TEXT)",
+        "CREATE TABLE IF NOT EXISTS coneras (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ip TEXT, zone TEXT DEFAULT '', last_checkin TEXT, current_version TEXT, status TEXT DEFAULT 'pendiente')",
+        "CREATE TABLE IF NOT EXISTS force_update (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, action TEXT DEFAULT 'none', created_at TEXT NOT NULL, acks TEXT DEFAULT '[]')",
+    ]:
         try:
-            c = _TursoConn(url, token)
-            c.execute("SELECT 1").fetchall()
-            _turso[0] = c
-            logging.info("Turso connected OK")
-            # Ensure tables exist on Turso too
-            for sql in [
-                "CREATE TABLE IF NOT EXISTS versions (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, created_at TEXT NOT NULL, file_count INTEGER DEFAULT 0, total_size INTEGER DEFAULT 0, checksum TEXT)",
-                "CREATE TABLE IF NOT EXISTS coneras (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ip TEXT, zone TEXT DEFAULT '', last_checkin TEXT, current_version TEXT, status TEXT DEFAULT 'pendiente')",
-                "CREATE TABLE IF NOT EXISTS force_update (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, action TEXT DEFAULT 'none', created_at TEXT NOT NULL, acks TEXT DEFAULT '[]')",
-            ]:
-                try:
-                    c.execute(sql).fetchall()
-                except Exception:
-                    pass
-            logging.info("Turso tables ready")
-            return c
-        except Exception as e:
-            logging.warning(f"Turso unavailable: {e}")
+            c.execute(sql).fetchall()
+        except Exception:
+            pass
+
+def _try_turso_once():
+    if not _turso_env_url or not _turso_env_token:
+        return None
+    try:
+        c = _TursoConn(_turso_env_url, _turso_env_token)
+        c.execute("SELECT 1").fetchall()
+        _turso_ensure_tables(c)
+        _turso[0] = c
+        logging.info("Turso connected OK")
+        return c
+    except Exception as e:
+        logging.warning(f"Turso unavailable: {e}")
+        return None
+
+def _turso_retry_loop():
+    while True:
+        if _turso[0] is not None:
+            return
+        _try_turso_once()
+        if _turso[0] is not None:
+            return
+        time.sleep(60)
 
 def get_db_connection():
     if _turso[0] is not None:
@@ -106,6 +123,7 @@ def get_db_connection():
     return sqlite3.connect(str(BASE_DIR / "sync.db"))
 
 def init_db():
+    _init_turso_env()
     import sqlite3
     conn = sqlite3.connect(str(BASE_DIR / "sync.db"))
     conn.execute("""
@@ -147,9 +165,9 @@ def init_db():
 
 init_db()
 
-# Try Turso in background (don't block startup)
+# Try Turso in background, retry every 60s until connected
 import threading
-t = threading.Thread(target=_try_turso, daemon=True)
+t = threading.Thread(target=_turso_retry_loop, daemon=True)
 t.start()
 
 # --- Helpers ---
@@ -452,6 +470,14 @@ def api_upload():
         logging.info(f"Subidos {uploaded} archivos via web")
         return jsonify({"success": True, "uploaded": uploaded})
     return jsonify({"error": "No se subieron archivos .dbf"}), 400
+
+@app.route("/api/diagnostic")
+def api_diagnostic():
+    return jsonify({
+        "turso_connected": _turso[0] is not None,
+        "turso_url_configured": bool(_turso_env_url),
+        "turso_token_configured": bool(_turso_env_token),
+    })
 
 if __name__ == "__main__":
     DB_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
