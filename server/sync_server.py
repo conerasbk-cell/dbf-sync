@@ -4,7 +4,6 @@ import time
 import shutil
 import hashlib
 import zipfile
-import sqlite3
 import logging
 from datetime import datetime
 from threading import Thread
@@ -16,7 +15,6 @@ BASE_DIR = Path(__file__).parent.absolute()
 DB_UPLOADS_DIR = BASE_DIR / "db_uploads"
 VERSIONS_DIR = BASE_DIR / "versions"
 LOGS_DIR = BASE_DIR / "logs"
-DB_PATH = BASE_DIR / "sync.db"
 
 app = Flask(__name__)
 
@@ -35,11 +33,20 @@ logging.basicConfig(
     ],
 )
 
-# --- DB init ---
+# --- DB connection ---
+def get_db_connection():
+    turso_url = os.environ.get("TURSO_DATABASE_URL")
+    turso_token = os.environ.get("TURSO_AUTH_TOKEN")
+    if turso_url and turso_token:
+        import libsql
+        return libsql.connect(database=turso_url, auth_token=turso_token)
+    import sqlite3
+    DB_PATH = BASE_DIR / "sync.db"
+    return sqlite3.connect(str(DB_PATH))
+
 def init_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("""
+    conn = get_db_connection()
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             version TEXT NOT NULL,
@@ -49,7 +56,7 @@ def init_db():
             checksum TEXT
         )
     """)
-    c.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS coneras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -61,10 +68,10 @@ def init_db():
         )
     """)
     try:
-        c.execute("ALTER TABLE coneras ADD COLUMN zone TEXT DEFAULT ''")
+        conn.execute("ALTER TABLE coneras ADD COLUMN zone TEXT DEFAULT ''")
     except Exception:
         pass
-    c.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS force_update (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             version TEXT NOT NULL,
@@ -80,12 +87,11 @@ init_db()
 
 # --- Helpers ---
 def get_current_version():
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT version, created_at, file_count, total_size, checksum FROM versions ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT version, created_at, file_count, total_size, checksum FROM versions ORDER BY id DESC LIMIT 1").fetchall()
     conn.close()
-    if row:
+    if rows:
+        row = rows[0]
         return {
             "version": row[0],
             "created_at": row[1],
@@ -119,9 +125,8 @@ def create_version_from_uploads():
     total_size = sum(f.stat().st_size for f in files)
     checksum = compute_checksum(zip_path)
 
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute(
+    conn = get_db_connection()
+    conn.execute(
         "INSERT INTO versions (version, created_at, file_count, total_size, checksum) VALUES (?, ?, ?, ?, ?)",
         (version_name, datetime.now().isoformat(), len(files), total_size, checksum),
     )
@@ -138,10 +143,8 @@ def create_version_from_uploads():
     }
 
 def get_coneras_list():
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT name, ip, zone, last_checkin, current_version, status FROM coneras ORDER BY zone, name")
-    rows = c.fetchall()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT name, ip, zone, last_checkin, current_version, status FROM coneras ORDER BY zone, name").fetchall()
     conn.close()
     ten_min_ago = datetime.now().isoformat(timespec="seconds")[:19]
     result = []
@@ -155,18 +158,16 @@ def get_coneras_list():
     return result
 
 def register_conera(name, ip, version, zone=""):
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT id FROM coneras WHERE name = ?", (name,))
-    row = c.fetchone()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT id FROM coneras WHERE name = ?", (name,)).fetchall()
     now = datetime.now().isoformat()
-    if row:
-        c.execute(
+    if rows:
+        conn.execute(
             "UPDATE coneras SET ip = ?, last_checkin = ?, current_version = ?, status = ? WHERE id = ?",
-            (ip, now, version, "actualizada", row[0]),
+            (ip, now, version, "actualizada", rows[0][0]),
         )
     else:
-        c.execute(
+        conn.execute(
             "INSERT INTO coneras (name, ip, zone, last_checkin, current_version, status) VALUES (?, ?, ?, ?, ?, ?)",
             (name, ip, zone, now, version, "actualizada"),
         )
@@ -189,10 +190,8 @@ def api_version():
 
 @app.route("/api/versions")
 def api_versions():
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT version, created_at, file_count, total_size, checksum FROM versions ORDER BY id DESC LIMIT 50")
-    rows = c.fetchall()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT version, created_at, file_count, total_size, checksum FROM versions ORDER BY id DESC LIMIT 50").fetchall()
     conn.close()
     return jsonify([
         {
@@ -207,10 +206,8 @@ def api_versions():
 
 @app.route("/api/conera/checkin-log")
 def api_conera_checkin_log():
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT name, last_checkin, current_version, zone FROM coneras WHERE last_checkin IS NOT NULL ORDER BY last_checkin DESC LIMIT 50")
-    rows = c.fetchall()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT name, last_checkin, current_version, zone FROM coneras WHERE last_checkin IS NOT NULL ORDER BY last_checkin DESC LIMIT 50").fetchall()
     conn.close()
     return jsonify([
         {"name": r[0], "time": r[1], "version": r[2], "zone": r[3]}
@@ -259,11 +256,10 @@ def api_conera_register():
     name = data.get("name", "desconocida")
     ip = request.remote_addr or data.get("ip", "")
     zone = data.get("zone", "")
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT id FROM coneras WHERE name = ?", (name,))
-    if not c.fetchone():
-        c.execute(
+    conn = get_db_connection()
+    rows = conn.execute("SELECT id FROM coneras WHERE name = ?", (name,)).fetchall()
+    if not rows:
+        conn.execute(
             "INSERT INTO coneras (name, ip, zone, last_checkin, current_version, status) VALUES (?, ?, ?, ?, ?, ?)",
             (name, ip, zone, datetime.now().isoformat(), "", "pendiente"),
         )
@@ -277,9 +273,8 @@ def api_conera_update_zone():
     data = request.json
     name = data.get("name", "")
     zone = data.get("zone", "")
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("UPDATE coneras SET zone = ? WHERE name = ?", (zone, name))
+    conn = get_db_connection()
+    conn.execute("UPDATE coneras SET zone = ? WHERE name = ?", (zone, name))
     conn.commit()
     conn.close()
     logging.info(f"Zona actualizada: {name} -> {zone}")
@@ -293,10 +288,9 @@ def api_force_update():
     v = get_current_version()
     if not v:
         return jsonify({"error": "No hay version disponible"}), 400
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("DELETE FROM force_update")
-    c.execute(
+    conn = get_db_connection()
+    conn.execute("DELETE FROM force_update")
+    conn.execute(
         "INSERT INTO force_update (version, action, created_at, acks) VALUES (?, ?, ?, ?)",
         (v["version"], action, datetime.now().isoformat(), json.dumps([])),
     )
@@ -310,12 +304,11 @@ def api_force_update_status():
     conera_name = request.args.get("conera_name", "")
     if not conera_name and request.json:
         conera_name = request.json.get("conera_name", "")
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT version, action, created_at, acks FROM force_update ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT version, action, created_at, acks FROM force_update ORDER BY id DESC LIMIT 1").fetchall()
     conn.close()
-    if row:
+    if rows:
+        row = rows[0]
         acks = json.loads(row[3]) if row[3] else []
         v = get_current_version()
         already_acked = any(a.get("name") == conera_name for a in acks) if conera_name else False
@@ -335,27 +328,24 @@ def api_force_update_ack():
     data = request.json
     name = data.get("name", "")
     status = data.get("status", "false")
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT acks FROM force_update ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
-    if row:
-        acks = json.loads(row[0]) if row[0] else []
+    conn = get_db_connection()
+    rows = conn.execute("SELECT acks FROM force_update ORDER BY id DESC LIMIT 1").fetchall()
+    if rows:
+        acks = json.loads(rows[0][0]) if rows[0][0] else []
         acks.append({"name": name, "status": status, "time": datetime.now().isoformat()})
-        c.execute("UPDATE force_update SET acks = ?", (json.dumps(acks),))
+        conn.execute("UPDATE force_update SET acks = ?", (json.dumps(acks),))
         conn.commit()
     conn.close()
     return jsonify({"success": True})
 
 @app.route("/api/force-update-results")
 def api_force_update_results():
-    conn = sqlite3.connect(str(DB_PATH))
-    c = conn.cursor()
-    c.execute("SELECT version, action, created_at, acks FROM force_update ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
+    conn = get_db_connection()
+    rows = conn.execute("SELECT version, action, created_at, acks FROM force_update ORDER BY id DESC LIMIT 1").fetchall()
     conn.close()
-    if not row:
+    if not rows:
         return jsonify({"has_results": False})
+    row = rows[0]
     acks = json.loads(row[3]) if row[3] else []
     # List all coneras with their ack status
     all_coneras = get_coneras_list()
