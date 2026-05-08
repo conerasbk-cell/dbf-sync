@@ -34,8 +34,6 @@ logging.basicConfig(
 )
 
 # --- DB connection ---
-import requests as _requests
-
 class _TursoResult:
     def __init__(self, rows):
         self._rows = rows
@@ -47,19 +45,20 @@ class _TursoResult:
 class _TursoConn:
     def __init__(self, url, token):
         self._url = url.rstrip('/') + '/v2/pipeline'
-        self._headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json',
-        }
+        self._token = token
 
     def execute(self, sql, params=None):
+        import json, urllib.request
         stmt = {"sql": sql}
         if params:
             stmt["args"] = [{"value": {"type": "text", "value": str(p)}} for p in params]
-        payload = {"requests": [{"type": "execute", "stmt": stmt}, {"type": "close"}]}
-        resp = _requests.post(self._url, headers=self._headers, json=payload, timeout=8)
-        resp.raise_for_status()
-        data = resp.json()
+        payload = json.dumps({"requests": [{"type": "execute", "stmt": stmt}, {"type": "close"}]}).encode()
+        req = urllib.request.Request(
+            self._url, data=payload,
+            headers={'Authorization': f'Bearer {self._token}', 'Content-Type': 'application/json'}
+        )
+        resp = urllib.request.urlopen(req, timeout=8)
+        data = json.loads(resp.read())
         result = data['results'][0]['response']['result']
         parsed = []
         for row in result.get('rows', []):
@@ -473,6 +472,19 @@ def api_upload():
         logging.info(f"Subidos {uploaded} archivos via web")
         return jsonify({"success": True, "uploaded": uploaded})
     return jsonify({"error": "No se subieron archivos .dbf"}), 400
+
+@app.route("/api/test-turso")
+def api_test_turso():
+    url = _turso_env_url
+    token = _turso_env_token
+    if not url or not token:
+        return jsonify({"ok": False, "error": "Turso not configured"})
+    try:
+        c = _TursoConn(url, token)
+        r = c.execute("SELECT 1").fetchall()
+        return jsonify({"ok": True, "rows": r})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"})
 
 @app.route("/api/diagnostic")
 def api_diagnostic():
