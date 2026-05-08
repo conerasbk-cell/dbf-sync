@@ -34,12 +34,80 @@ logging.basicConfig(
 )
 
 # --- DB connection ---
+import requests as _requests
+
+class _TursoResult:
+    def __init__(self, rows):
+        self._rows = rows
+    def fetchall(self):
+        return self._rows
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+class _TursoConn:
+    def __init__(self, url, token):
+        self._url = url.rstrip('/') + '/v2/pipeline'
+        self._headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+        }
+
+    def execute(self, sql, params=None):
+        stmt = {"sql": sql}
+        if params:
+            stmt["args"] = [{"value": {"type": "text", "value": str(p)}} for p in params]
+        payload = {"requests": [{"type": "execute", "stmt": stmt}, {"type": "close"}]}
+        resp = _requests.post(self._url, headers=self._headers, json=payload, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        result = data['results'][0]['response']['result']
+        parsed = []
+        for row in result.get('rows', []):
+            parsed.append(tuple(cell.get('value') if cell else None for cell in row))
+        return _TursoResult(parsed)
+
+    def commit(self):
+        pass
+    def close(self):
+        pass
+
+_turso = [None]  # mutable so _try_turso can update it
+
+def _try_turso():
+    url = os.environ.get("TURSO_DATABASE_URL", "")
+    token = os.environ.get("TURSO_AUTH_TOKEN", "")
+    if url and token:
+        if url.startswith("libsql://"):
+            url = "https://" + url[8:]
+        try:
+            c = _TursoConn(url, token)
+            c.execute("SELECT 1").fetchall()
+            _turso[0] = c
+            logging.info("Turso connected OK")
+            # Ensure tables exist on Turso too
+            for sql in [
+                "CREATE TABLE IF NOT EXISTS versions (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, created_at TEXT NOT NULL, file_count INTEGER DEFAULT 0, total_size INTEGER DEFAULT 0, checksum TEXT)",
+                "CREATE TABLE IF NOT EXISTS coneras (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ip TEXT, zone TEXT DEFAULT '', last_checkin TEXT, current_version TEXT, status TEXT DEFAULT 'pendiente')",
+                "CREATE TABLE IF NOT EXISTS force_update (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, action TEXT DEFAULT 'none', created_at TEXT NOT NULL, acks TEXT DEFAULT '[]')",
+            ]:
+                try:
+                    c.execute(sql).fetchall()
+                except Exception:
+                    pass
+            logging.info("Turso tables ready")
+            return c
+        except Exception as e:
+            logging.warning(f"Turso unavailable: {e}")
+
 def get_db_connection():
+    if _turso[0] is not None:
+        return _turso[0]
     import sqlite3
     return sqlite3.connect(str(BASE_DIR / "sync.db"))
 
 def init_db():
-    conn = get_db_connection()
+    import sqlite3
+    conn = sqlite3.connect(str(BASE_DIR / "sync.db"))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +146,11 @@ def init_db():
     conn.close()
 
 init_db()
+
+# Try Turso in background (don't block startup)
+import threading
+t = threading.Thread(target=_try_turso, daemon=True)
+t.start()
 
 # --- Helpers ---
 def get_current_version():
