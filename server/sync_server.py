@@ -51,7 +51,7 @@ class _TursoConn:
         import json, urllib.request
         stmt = {"sql": sql}
         if params:
-            stmt["args"] = [{"value": {"type": "text", "value": str(p)}} for p in params]
+            stmt["args"] = [{"type": "text", "value": str(p)} for p in params]
         payload = json.dumps({"requests": [{"type": "execute", "stmt": stmt}, {"type": "close"}]}).encode()
         req = urllib.request.Request(
             self._url, data=payload,
