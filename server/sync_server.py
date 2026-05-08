@@ -64,7 +64,17 @@ class _TursoConn:
         result = data['results'][0]['response']['result']
         parsed = []
         for row in result.get('rows', []):
-            parsed.append(tuple(cell.get('value') if cell else None for cell in row))
+            vals = []
+            for cell in row:
+                if cell is None:
+                    vals.append(None)
+                elif cell.get('type') == 'integer':
+                    vals.append(int(cell['value']))
+                elif cell.get('type') == 'real':
+                    vals.append(float(cell['value']))
+                else:
+                    vals.append(cell.get('value', ''))
+            parsed.append(tuple(vals))
         return _TursoResult(parsed)
 
     def commit(self):
