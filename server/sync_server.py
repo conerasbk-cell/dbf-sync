@@ -319,15 +319,19 @@ def api_coneras():
 
 @app.route("/api/create-version", methods=["POST"])
 def api_create_version():
-    files = list(DB_UPLOADS_DIR.glob("*.dbf"))
-    if not files:
-        return jsonify({"error": "No hay archivos .dbf en db_uploads/"}), 400
+    try:
+        files = list(DB_UPLOADS_DIR.glob("*.dbf"))
+        if not files:
+            return jsonify({"error": "No hay archivos .dbf en db_uploads/"}), 400
 
-    result = create_version_from_uploads()
-    if result:
-        logging.info(f"Version creada: {result['version']} ({result['file_count']} archivos)")
-        return jsonify({"success": True, "version": result})
-    return jsonify({"error": "Error al crear version"}), 500
+        result = create_version_from_uploads()
+        if result:
+            logging.info(f"Version creada: {result['version']} ({result['file_count']} archivos)")
+            return jsonify({"success": True, "version": result})
+        return jsonify({"error": "Error al crear version"}), 500
+    except Exception as e:
+        logging.error(f"Error en create-version: {e}", exc_info=True)
+        return jsonify({"error": f"Error interno: {type(e).__name__}: {e}"}), 500
 
 @app.route("/api/conera/checkin", methods=["POST"])
 def api_conera_checkin():
