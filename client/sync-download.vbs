@@ -482,6 +482,58 @@ Function DownloadZip(version)
         End If
     End If
     
+    ' Try Firefox with temp profile (auto-download, hidden)
+    Dim fxPath
+    fxPath = FindFirefox()
+    If fxPath <> "" Then
+        Dim fxTemp, fxDlDir, fxProfileDir, fxPrefs, fxCmd
+        fxTemp = fso.GetSpecialFolder(2) & "\fx_dl_" & version
+        fxDlDir = fxTemp & "\downloads"
+        fxProfileDir = fxTemp & "\profile"
+        If fso.FolderExists(fxTemp) Then fso.DeleteFolder fxTemp, True
+        fso.CreateFolder fxDlDir
+        fso.CreateFolder fxProfileDir
+        ' Write user.js for auto-download
+        fxPrefs = fxProfileDir & "\user.js"
+        Dim prefsLines
+        prefsLines = "user_pref(""browser.download.folderList"", 2);" & vbCrLf & _
+                     "user_pref(""browser.download.dir"", """ & Replace(fxDlDir, "\", "\\") & """);" & vbCrLf & _
+                     "user_pref(""browser.download.useDownloadDir"", true);" & vbCrLf & _
+                     "user_pref(""browser.helperApps.neverAsk.saveToDisk"", ""application/zip,application/x-zip,application/x-zip-compressed"");" & vbCrLf & _
+                     "user_pref(""browser.download.manager.showWhenStarting"", false);" & vbCrLf & _
+                     "user_pref(""browser.download.manager.focusWhenStarting"", false);" & vbCrLf & _
+                     "user_pref(""browser.download.manager.showAlertOnComplete"", false);" & vbCrLf & _
+                     "user_pref(""browser.shell.checkDefaultBrowser"", false);" & vbCrLf & _
+                     "user_pref(""browser.shell.skipDefaultBrowserCheckOnFirstRun"", true);"
+        WriteFile fxPrefs, prefsLines
+        ' Launch Firefox hidden with temp profile
+        fxCmd = """" & fxPath & """ --profile """ & fxProfileDir & """ --no-remote --new-window """ & url & """"
+        shell.Run fxCmd, 0, False
+        WScript.Sleep 20000
+        ' Kill Firefox
+        On Error Resume Next
+        shell.Run "taskkill /f /im firefox.exe", 0, True
+        On Error Goto 0
+        WScript.Sleep 1000
+        ' Look for downloaded zip in custom dir and Downloads
+        Dim fxDlFile, fxF, fxFC
+        fxDlFile = fxDlDir & "\" & version & ".zip"
+        If fso.FileExists(fxDlFile) Then
+            fso.CopyFile fxDlFile, tmpZip, True
+        Else
+            Set fxFC = fso.GetFolder(fxDlDir).Files
+            For Each fxF In fxFC
+                If LCase(fso.GetExtensionName(fxF.Name)) = "zip" Then
+                    fso.CopyFile fxF.Path, tmpZip, True
+                End If
+            Next
+        End If
+        If fso.FileExists(tmpZip) And fso.GetFile(tmpZip).Size > 0 Then
+            DownloadZip = ExtractAndInstall(tmpZip, version)
+            Exit Function
+        End If
+    End If
+
     DownloadZip = False
 End Function
 

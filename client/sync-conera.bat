@@ -147,16 +147,41 @@ if "%FIREFOX_PATH%"=="" where firefox.exe >nul 2>nul && set FIREFOX_PATH=firefox
 echo [%date% %time%] FIREFOX PATH: %FIREFOX_PATH% >> "%LOG_FILE%"
 
 if not "%FIREFOX_PATH%"=="" (
-    echo   - Firefox...
+    echo   - Firefox (perfil temp)...
     title DBF Sync - %CONERA% - Firefox...
+
+    set FX_TEMP=%TEMP%\fx_dl_%VERSION%
+    set FX_DL_DIR=!FX_TEMP!\downloads
+    set FX_PROFILE_DIR=!FX_TEMP!\profile
+    if exist "!FX_TEMP!" rmdir /s /q "!FX_TEMP!" 2>nul
+    md "!FX_DL_DIR!" 2>nul
+    md "!FX_PROFILE_DIR!" 2>nul
+
+    (
+    echo user_pref("browser.download.folderList", 2^);
+    echo user_pref("browser.download.dir", "!FX_DL_DIR:\=\\!"^);
+    echo user_pref("browser.download.useDownloadDir", true^);
+    echo user_pref("browser.helperApps.neverAsk.saveToDisk", "application/zip,application/x-zip,application/x-zip-compressed"^);
+    echo user_pref("browser.download.manager.showWhenStarting", false^);
+    echo user_pref("browser.download.manager.focusWhenStarting", false^);
+    echo user_pref("browser.download.manager.showAlertOnComplete", false^);
+    echo user_pref("browser.shell.checkDefaultBrowser", false^);
+    echo user_pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", true^);
+    ) > "!FX_PROFILE_DIR!\user.js"
+
     taskkill /f /im firefox.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start /min "" "%FIREFOX_PATH%" --new-window "%SERVER_URL%/api/download/%VERSION%" >>"%LOG_FILE%" 2>&1
+    start /min "" "%FIREFOX_PATH%" --profile "!FX_PROFILE_DIR!" --no-remote --new-window "%SERVER_URL%/api/download/%VERSION%" >>"%LOG_FILE%" 2>&1
     timeout /t 20 /nobreak >nul
     taskkill /f /im firefox.exe >nul 2>nul
-    for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
-        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        del "%%f" 2>nul
+    timeout /t 1 /nobreak >nul
+
+    for /f "delims=" %%f in ('dir /a-d /s /b "!FX_DL_DIR!\*.zip" 2^>nul') do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+    if not exist "%ZIP_FILE%" (
+        for /f "delims=" %%f in ('dir /a-d /s /b "%DOWNLOADS_DIR%\*%VERSION%*.zip" 2^>nul') do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+            del "%%f" 2>nul
+        )
     )
     if exist "%ZIP_FILE%" (
         echo [%date% %time%] FIREFOX OK >> "%LOG_FILE%"
