@@ -31,78 +31,56 @@ echo DATA: %DATA_DIR%
 echo NEWDATA: %NEWDATA_DIR%
 echo.
 
-REM ===== MENU DE NAVEGADOR =====
+REM ===== MENU =====
 :MENU
 cls
 echo =============================================
-echo   Seleccione el navegador a usar:
+echo   Seleccione navegador (fallback si todo falla):
 echo =============================================
 echo.
 echo   1. Google Chrome
 echo   2. Mozilla Firefox
-echo   3. Automatico (prueba todo)
+echo   3. Automatico (prueba todo, abre navegador solo si es necesario)
 echo.
 set BROWSER=
 set /p BROWSER="Opcion (1-3): "
-if "%BROWSER%"=="1" goto browser_chrome
-if "%BROWSER%"=="2" goto browser_firefox
-if "%BROWSER%"=="3" goto browser_auto
-goto MENU
+if "%BROWSER%"=="1" set BROWSER_MODE=chrome
+if "%BROWSER%"=="2" set BROWSER_MODE=firefox
+if "%BROWSER%"=="3" set BROWSER_MODE=auto
+if "%BROWSER_MODE%"=="" goto MENU
 
-:browser_chrome
 echo.
-echo  [Chrome] Verificando que este instalado...
-reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" >nul 2>nul
-if errorlevel 1 (
-    echo  ERROR: Chrome no encontrado en el registro
-    echo  Presione Enter para volver al menu...
-    pause >nul
-    goto MENU
-)
-set BROWSER_MODE=chrome
-goto step1
-
-:browser_firefox
+echo  Seleccionado: %BROWSER_MODE%
 echo.
-echo  [Firefox] Verificando que este instalado...
-reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe" >nul 2>nul
-if errorlevel 1 (
-    echo  ERROR: Firefox no encontrado en el registro
-    echo  Presione Enter para volver al menu...
-    pause >nul
-    goto MENU
-)
-set BROWSER_MODE=firefox
-goto step1
+echo  NOTA: Primero se intentan metodos silenciosos
+echo  (PowerShell, bitsadmin, certutil, VBScript).
+echo  El navegador solo se abre si esos fallan.
+echo.
+echo  Presione Enter para comenzar...
+pause >nul
 
-:browser_auto
-set BROWSER_MODE=auto
-goto step1
-
-REM ===== PASO 1: TLS =====
-:step1
+REM ===== MAIN UPDATE CYCLE =====
+:UPDATE_CYCLE
 cls
 echo =============================================
 echo   DBF Sync - %CONERA%
 echo   Modo: %BROWSER_MODE%
 echo =============================================
 echo.
-echo [1/6] Activando TLS 1.2 en el sistema...
+
+REM ===== PASO 1: TLS =====
+echo [1/6] Activando TLS 1.2...
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f >nul 2>nul
 echo  OK
 
-goto step2_%BROWSER_MODE%
-
 REM ===== PASO 2: VERSION =====
-:step2_auto
-:step2_chrome
-:step2_firefox
 echo [2/6] Obteniendo version del servidor...
 set VERSION=
 cscript //nologo "%~dp0sync-download.vbs" version > "%TEMP%\dbf_version.txt" 2>nul
 set /p VERSION=<"%TEMP%\dbf_version.txt"
 
 if "%VERSION%"=="" (
+    echo  Intentando PowerShell...
     powershell -ExecutionPolicy Bypass -Command ^
 "try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
 "try { $w = New-Object Net.WebClient; $r = $w.DownloadString('%SERVER_URL%/api/version'); " ^
@@ -112,104 +90,116 @@ if "%VERSION%"=="" (
 )
 
 if "%VERSION%"=="" (
-    cls
-    echo =============================================
-    echo   ERROR: No se pudo conectar al servidor
-    echo =============================================
+    echo  ERROR: No se pudo conectar al servidor
     echo.
-    echo  Verifique que la conera tenga acceso a internet.
-    echo  Si el navegador funciona, puede descargar manualmente:
+    echo  Verifique internet y que el servidor este desplegado
+    echo  %SERVER_URL%/api/version
     echo.
-    echo  %SERVER_URL%/api/download
-    echo.
-    pause
+    echo  Cerrando en 10 segundos...
+    timeout /t 10 /nobreak >nul
     exit /b 1
 )
-echo  Version encontrada: %VERSION%
+echo  OK: %VERSION%
 
-REM ===== PASO 3: VERSION LOCAL =====
+REM ===== PASO 3: COMPARAR =====
 echo [3/6] Verificando version local...
 set LOCAL_VER=
 if exist "%VERSION_FILE%" (
     set /p LOCAL_VER=<"%VERSION_FILE%"
 )
 if "%LOCAL_VER%"=="%VERSION%" (
-    echo  Ya esta actualizado (version: %VERSION%)
-    echo.
-    cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
-    echo  Check-in enviado
-    echo.
-    echo =============================================
-    echo   Conera actualizada al %date% %time%
-    echo =============================================
-    pause
-    exit /b 0
+    echo  Ya actualizado: %VERSION%
+    goto checkin_and_loop
 )
 echo  Local: %LOCAL_VER% ^| Servidor: %VERSION%
 
 REM ===== PASO 4: DESCARGAR =====
-echo [4/6] Descargando actualizacion...
+echo [4/6] Descargando...
 set ZIP_FILE=%TEMP%\dbf_sync_%VERSION%.zip
 del "%ZIP_FILE%" 2>nul
 
-if "%BROWSER_MODE%"=="chrome" goto dl_chrome
-if "%BROWSER_MODE%"=="firefox" goto dl_firefox
-goto dl_auto
-
-:dl_auto
-echo  Intentando bitsadmin...
+REM Siempre probar metodos silenciosos primero (sin ventanas):
+echo   - bitsadmin...
 bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
-if exist "%ZIP_FILE%" goto download_ok
-echo  Intentando certutil...
+if exist "%ZIP_FILE%" goto extraer
+
+echo   - certutil...
 certutil -urlcache -split -f "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
-if exist "%ZIP_FILE%" goto download_ok
-echo  Intentando PowerShell...
+if exist "%ZIP_FILE%" goto extraer
+
+echo   - PowerShell...
 powershell -ExecutionPolicy Bypass -Command ^
 "try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
 "try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}" >nul 2>nul
-if exist "%ZIP_FILE%" goto download_ok
-:dl_chrome
-echo  Intentando Chrome...
-for %%X in (chrome.exe) do (set FOUND=%%~$PATH:X)
-if not "!FOUND!"=="" (
-    start /wait "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-    timeout /t 5 /nobreak >nul
-    for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
-        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        if exist "!ZIP_FILE!" goto download_ok
-    )
-)
-:dl_firefox
-echo  Intentando Firefox...
-for %%X in (firefox.exe) do (set FOUND=%%~$PATH:X)
-if not "!FOUND!"=="" (
-    start /wait "" firefox --headless "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-    timeout /t 5 /nobreak >nul
-    for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
-        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        if exist "!ZIP_FILE!" goto download_ok
-    )
-)
-echo  Intentando VBScript...
+if exist "%ZIP_FILE%" goto extraer
+
+echo   - VBScript (multi-metodo)...
 cscript //nologo "%~dp0sync-download.vbs" download "%VERSION%" >nul 2>nul
-if exist "%ZIP_FILE%" goto download_ok
+if exist "%ZIP_FILE%" goto extraer
 
-cls
-echo =============================================
-echo   ERROR: No se pudo descargar
-echo =============================================
+REM Ultimo recurso: abrir navegador (ventana visible)
 echo.
-echo  Abra el navegador manualmente y pegue esta URL:
-echo.
-echo  %SERVER_URL%/api/download/%VERSION%
-echo.
-echo  Luego copie el ZIP a esta carpeta y ejecute de nuevo
-echo.
-pause
-exit /b 1
+echo   [!] Metodos silenciosos fallaron.
+echo   Abriendo %BROWSER_MODE% como ultimo recurso...
 
-:download_ok
-echo  Descargado OK
+if "%BROWSER_MODE%"=="chrome" (
+    where chrome.exe >nul 2>nul
+    if !errorlevel! equ 0 (
+        start /wait "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+        timeout /t 5 /nobreak >nul
+        for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        )
+    )
+)
+if "%BROWSER_MODE%"=="firefox" (
+    where firefox.exe >nul 2>nul
+    if !errorlevel! equ 0 (
+        start /wait "" firefox --headless "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+        timeout /t 5 /nobreak >nul
+        for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        )
+    )
+)
+if "%BROWSER_MODE%"=="auto" (
+    where chrome.exe >nul 2>nul
+    if !errorlevel! equ 0 (
+        start /wait "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+        timeout /t 5 /nobreak >nul
+        for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        )
+    )
+    if not exist "%ZIP_FILE%" (
+        where firefox.exe >nul 2>nul
+        if !errorlevel! equ 0 (
+            start /wait "" firefox --headless "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+            timeout /t 5 /nobreak >nul
+            for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
+                copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+            )
+        )
+    )
+)
+
+if not exist "%ZIP_FILE%" (
+    echo.
+    echo  ERROR: No se pudo descargar
+    echo  URL: %SERVER_URL%/api/download/%VERSION%
+    echo.
+    echo  Descargue manualmente y copie a:
+    echo  %ZIP_FILE%
+    echo  Luego presione Enter para continuar
+    pause
+    if not exist "%ZIP_FILE%" (
+        echo  Continuando sin actualizar...
+        goto checkin_and_loop
+    )
+)
+
+:extraer
+echo  ZIP descargado OK
 
 REM ===== PASO 5: EXTRAER =====
 echo [5/6] Extrayendo archivos...
@@ -231,22 +221,67 @@ for /r "%EXTRACT_DIR%" %%f in (*.dbf) do (
 )
 
 echo %VERSION% > "%VERSION_FILE%"
-echo  Archivos copiados OK
+echo  OK
 
-REM ===== PASO 6: CHECK-IN =====
-echo [6/6] Enviando check-in al servidor...
+REM ===== CHECK-IN =====
+:checkin_and_loop
+echo [6/6] Enviando check-in...
 cscript //nologo "%~dp0sync-download.vbs" register >nul 2>nul
 cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
 echo  OK
 
-del "%ZIP_FILE%" 2>nul
+del "%ZIP_FILE%" "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
-del "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
 
 echo.
 echo =============================================
-echo   ACTUALIZACION COMPLETADA
-echo   Version: %VERSION%
-echo   Fecha: %date% %time%
+echo   Actualizado: %VERSION%
+echo   Hora: %date% %time%
 echo =============================================
-pause
+echo.
+
+REM ===== LOOP CADA 5 MINUTOS =====
+echo  Entrando en modo vigilancia (check-in cada 5 minutos)
+echo  Cierre la ventana para detener
+echo.
+
+:LOOP_5MIN
+timeout /t 300 /nobreak >nul
+
+REM Verificar version sin mostrar toda la pantalla
+title DBF Sync - %CONERA% - verificando...
+set OLD_VERSION=%VERSION%
+set VERSION=
+
+cscript //nologo "%~dp0sync-download.vbs" version > "%TEMP%\dbf_version.txt" 2>nul
+set /p VERSION=<"%TEMP%\dbf_version.txt"
+
+if "%VERSION%"=="" (
+    powershell -ExecutionPolicy Bypass -Command ^
+"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
+"try { $w = New-Object Net.WebClient; $r = $w.DownloadString('%SERVER_URL%/api/version'); " ^
+"$m = [regex]::Match($r, '\"\"version\"\":\s*\"\"([^\"]+)\"\"'); if($m.Success){$m.Groups[1].Value}else{''} " ^
+"} catch { '' }" > "%TEMP%\dbf_version2.txt" 2>nul
+    set /p VERSION=<"%TEMP%\dbf_version2.txt"
+)
+
+if "%VERSION%"=="" (
+    title DBF Sync - %CONERA% - sin conexion
+    goto checkin_loop
+)
+
+if not "%VERSION%"=="%OLD_VERSION%" (
+    echo [%date% %time%] Nueva version detectada: %VERSION%
+    title DBF Sync - %CONERA% - actualizando a %VERSION%
+    goto UPDATE_CYCLE
+)
+
+:checkin_loop
+title DBF Sync - %CONERA% - esperando
+cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
+del "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
+
+echo [%date% %time%] Check-in: %VERSION%
+
+title DBF Sync - %CONERA% - OK
+goto LOOP_5MIN
