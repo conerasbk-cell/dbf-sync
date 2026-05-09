@@ -111,23 +111,39 @@ for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES
 if "%CHROME_PATH%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH=chrome.exe
 
 if not "%CHROME_PATH%"=="" (
-    echo   - Chrome (visibile)...
-    echo.
-    echo  *****************************************************
-    echo   Se abrira Chrome para descargar el ZIP.
-    echo   Cuando aparezca la descarga, guarde el archivo.
-    echo   Luego CIERRE Chrome y presione Enter para continuar.
-    echo  *****************************************************
-    echo.
+    echo   - Chrome (perfil temporal)...
+
+    REM Crear perfil temporal de Chrome con descarga automatica
+    set CHROME_TEMP=%TEMP%\chrome_dl_%VERSION%
+    set CHROME_DL_DIR=%CHROME_TEMP%\downloads
+    set CHROME_UD_DIR=%CHROME_TEMP%\user-data
+    if exist "%CHROME_TEMP%" rmdir /s /q "%CHROME_TEMP%" 2>nul
+    md "%CHROME_DL_DIR%" 2>nul
+    md "%CHROME_UD_DIR%\Default" 2>nul
+
+    REM Preferences: descarga automatica sin preguntar
+    powershell -ExecutionPolicy Bypass -Command ^
+"$d='%CHROME_DL_DIR:\=\\'; " ^
+"$j='{\"download\":{\"default_directory\":\"'+$d+'\",\"prompt_for_download\":false,\"directory_upgrade\":true},\"safebrowsing\":{\"enabled\":false},\"browser\":{\"check_default_browser\":false}}'; " ^
+"[System.IO.File]::WriteAllText('%CHROME_UD_DIR%\Default\Preferences',$j)" >nul 2>nul
+
     taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start "" "%CHROME_PATH%" --no-sandbox --disable-gpu --new-window "%SERVER_URL%/api/download/%VERSION%"
-    pause
+    start /min "" "%CHROME_PATH%" --user-data-dir="%CHROME_UD_DIR%" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    timeout /t 20 /nobreak >nul
     taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
+
+    REM Buscar en el directorio de descargas configurado
+    for /r "%CHROME_DL_DIR%" %%f in (*.zip) do (
         copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        del "%%f" 2>nul
+    )
+    REM Si no aparece, buscar en Downloads normal
+    if not exist "%ZIP_FILE%" (
+        for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+            del "%%f" 2>nul
+        )
     )
     if exist "%ZIP_FILE%" goto extraer
 )

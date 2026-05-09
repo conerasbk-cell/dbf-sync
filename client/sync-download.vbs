@@ -436,20 +436,47 @@ Function DownloadZip(version)
         Exit Function
     End If
     
-    ' Try Chrome (hidden, triggers download to Downloads folder)
+    ' Try Chrome with temp profile (auto-download, hidden)
     Dim browserPath
     browserPath = FindChrome()
     If browserPath <> "" Then
-        shell.Run """" & browserPath & """ """ & url & """", 0, False
-        WScript.Sleep 8000
-        ' Check common downloads folder
-        Dim dlFolder
-        dlFolder = shell.ExpandEnvironmentStrings("%USERPROFILE%\Downloads")
+        Dim chromeTemp, chromeDlDir, chromeUdDir, prefsFile, prefsJson
+        chromeTemp = fso.GetSpecialFolder(2) & "\chrome_dl_" & version
+        chromeDlDir = chromeTemp & "\downloads"
+        chromeUdDir = chromeTemp & "\user-data"
+        If fso.FolderExists(chromeTemp) Then fso.DeleteFolder chromeTemp, True
+        fso.CreateFolder chromeDlDir
+        fso.CreateFolder chromeUdDir & "\Default"
+        ' Write Preferences file for auto-download
+        prefsFile = chromeUdDir & "\Default\Preferences"
+        prefsJson = "{""download"":{""default_directory"":""" & Replace(chromeDlDir, "\", "\\") & """,""prompt_for_download"":false,""directory_upgrade"":true},""safebrowsing"":{""enabled"":false},""browser"":{""check_default_browser"":false}}"
+        WriteFile prefsFile, prefsJson
+        ' Launch Chrome hidden with temp profile
+        Dim chromeCmd
+        chromeCmd = """" & browserPath & """ --user-data-dir=""" & chromeUdDir & """ --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window """ & url & """"
+        shell.Run chromeCmd, 0, False
+        WScript.Sleep 20000
+        ' Kill Chrome
+        On Error Resume Next
+        shell.Run "taskkill /f /im chrome.exe", 0, True
+        On Error Goto 0
+        WScript.Sleep 1000
+        ' Look for downloaded zip in custom dir and Downloads
         Dim dlFile
-        dlFile = dlFolder & "\" & version & ".zip"
+        dlFile = chromeDlDir & "\" & version & ".zip"
         If fso.FileExists(dlFile) Then
             fso.CopyFile dlFile, tmpZip, True
-            fso.DeleteFile dlFile, True
+        Else
+            ' Search recursively in the download dir
+            Dim f, fc
+            Set fc = fso.GetFolder(chromeDlDir).Files
+            For Each f In fc
+                If LCase(fso.GetExtensionName(f.Name)) = "zip" Then
+                    fso.CopyFile f.Path, tmpZip, True
+                End If
+            Next
+        End If
+        If fso.FileExists(tmpZip) And fso.GetFile(tmpZip).Size > 0 Then
             DownloadZip = ExtractAndInstall(tmpZip, version)
             Exit Function
         End If
