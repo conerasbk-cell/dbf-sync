@@ -86,34 +86,19 @@ echo  Local: %LOCAL_VER% ^| Servidor: %VERSION%
 
 REM ===== PASO 4: DESCARGAR =====
 echo [4/6] Descargando...
+title DBF Sync - %CONERA% - descargando...
 set ZIP_FILE=%TEMP%\dbf_sync_%VERSION%.zip
 set DOWNLOADS_DIR=%USERPROFILE%\Downloads
 del "%ZIP_FILE%" 2>nul
 
-REM Metodos silenciosos (sin ventanas):
-echo   - bitsadmin...
-bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
-
-echo   - certutil...
-certutil -urlcache -split -f "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
-
-echo   - PowerShell...
-powershell -ExecutionPolicy Bypass -Command ^
-"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
-"try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}" >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
-
-REM Buscar Chrome por rutas comunes
+REM ===== METODO 1: CHROME (mas rapido en coneras con TLS roto) =====
 set CHROME_PATH=
 for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH=%%~p
 if "%CHROME_PATH%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH=chrome.exe
 
 if not "%CHROME_PATH%"=="" (
-    echo   - Chrome (perfil temporal)...
-
-    REM Crear perfil temporal de Chrome con descarga automatica
+    echo   - Chrome (perfil temp)... 
+    title DBF Sync - %CONERA% - Chrome descargando...
     set CHROME_TEMP=%TEMP%\chrome_dl_%VERSION%
     set CHROME_DL_DIR=%CHROME_TEMP%\downloads
     set CHROME_UD_DIR=%CHROME_TEMP%\user-data
@@ -121,24 +106,19 @@ if not "%CHROME_PATH%"=="" (
     md "%CHROME_DL_DIR%" 2>nul
     md "%CHROME_UD_DIR%\Default" 2>nul
 
-    REM Preferences: descarga automatica sin preguntar
     powershell -ExecutionPolicy Bypass -Command ^
-"$d='%CHROME_DL_DIR:\=\\'; " ^
-"$j='{\"download\":{\"default_directory\":\"'+$d+'\",\"prompt_for_download\":false,\"directory_upgrade\":true},\"safebrowsing\":{\"enabled\":false},\"browser\":{\"check_default_browser\":false}}'; " ^
+"$d='%CHROME_DL_DIR:\=\\';" ^
+"$j='{\"download\":{\"default_directory\":\"'+$d+'\",\"prompt_for_download\":false,\"directory_upgrade\":true},\"safebrowsing\":{\"enabled\":false},\"browser\":{\"check_default_browser\":false}}';" ^
 "[System.IO.File]::WriteAllText('%CHROME_UD_DIR%\Default\Preferences',$j)" >nul 2>nul
 
-    taskkill /f /im chrome.exe >nul 2>nul
+    taskkill /f /im chrome.exe >nul 2>nul >nul 2>nul
     timeout /t 1 /nobreak >nul
     start /min "" "%CHROME_PATH%" --user-data-dir="%CHROME_UD_DIR%" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
     timeout /t 20 /nobreak >nul
-    taskkill /f /im chrome.exe >nul 2>nul
+    taskkill /f /im chrome.exe >nul 2>nul >nul 2>nul
     timeout /t 1 /nobreak >nul
 
-    REM Buscar en el directorio de descargas configurado
-    for /r "%CHROME_DL_DIR%" %%f in (*.zip) do (
-        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-    )
-    REM Si no aparece, buscar en Downloads normal
+    for /r "%CHROME_DL_DIR%" %%f in (*.zip) do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
     if not exist "%ZIP_FILE%" (
         for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
             copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
@@ -148,24 +128,19 @@ if not "%CHROME_PATH%"=="" (
     if exist "%ZIP_FILE%" goto extraer
 )
 
-REM Buscar Firefox
+REM ===== METODO 2: FIREFOX (si Chrome no esta o fallo) =====
 set FIREFOX_PATH=
 for %%p in ("%PROGRAMFILES%\Mozilla Firefox\firefox.exe" "%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe") do if exist "%%~p" set FIREFOX_PATH=%%~p
 if "%FIREFOX_PATH%"=="" where firefox.exe >nul 2>nul && set FIREFOX_PATH=firefox.exe
 
 if not "%FIREFOX_PATH%"=="" (
-    echo   - Firefox (visible)...
-    echo.
-    echo  *****************************************************
-    echo   Se abrira Firefox para descargar el ZIP.
-    echo   Guarde el archivo, cierre Firefox y presione Enter.
-    echo  *****************************************************
-    echo.
-    taskkill /f /im firefox.exe >nul 2>nul
+    echo   - Firefox...
+    title DBF Sync - %CONERA% - Firefox descargando...
+    taskkill /f /im firefox.exe >nul 2>nul >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start "" "%FIREFOX_PATH%" --new-window "%SERVER_URL%/api/download/%VERSION%"
-    pause
-    taskkill /f /im firefox.exe >nul 2>nul
+    start /min "" "%FIREFOX_PATH%" --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    timeout /t 20 /nobreak >nul
+    taskkill /f /im firefox.exe >nul 2>nul >nul 2>nul
     for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
         copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
         del "%%f" 2>nul
@@ -173,17 +148,34 @@ if not "%FIREFOX_PATH%"=="" (
     if exist "%ZIP_FILE%" goto extraer
 )
 
-REM Nada funciono
+REM ===== METODO 3: bitsadmin (fallback) =====
+echo   - bitsadmin...
+bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
+if exist "%ZIP_FILE%" goto extraer
+
+REM ===== METODO 4: certutil (fallback) =====
+echo   - certutil...
+certutil -urlcache -split -f "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
+if exist "%ZIP_FILE%" goto extraer
+
+REM ===== METODO 5: PowerShell con timeout =====
+echo   - PowerShell (15s timeout)...
+start /b /min cmd /c "powershell -ExecutionPolicy Bypass -Command """try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}""" >nul 2>nul"
+timeout /t 15 /nobreak >nul
+taskkill /f /im powershell.exe >nul 2>nul
+if exist "%ZIP_FILE%" goto extraer
+
+REM ===== NADA FUNCIONO =====
+title DBF Sync - %CONERA% - ERROR descarga
 echo.
-echo  ERROR: No se pudo descargar automaticamente.
+echo  ERROR: No se pudo descargar.
 echo.
 echo  Abra Chrome y navegue a:
 echo  %SERVER_URL%/api/download/%VERSION%
 echo.
-echo  Guarde el archivo ZIP en:
+echo  Guarde el archivo en:
 echo  %ZIP_FILE%
 echo.
-echo  Luego presione Enter para continuar...
 pause
 if not exist "%ZIP_FILE%" (
     echo  Continuando sin actualizar...
