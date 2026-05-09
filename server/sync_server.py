@@ -526,6 +526,49 @@ def api_force_update_results():
         "results": results,
     })
 
+@app.route("/api/conera/delete", methods=["POST"])
+def api_conera_delete():
+    data = request.json
+    name = data.get("name", "")
+    if not name:
+        return jsonify({"error": "Nombre requerido"}), 400
+    conn = get_db_connection()
+    conn.execute("DELETE FROM coneras WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    logging.info(f"Conera eliminada: {name}")
+    return jsonify({"success": True})
+
+@app.route("/api/version/delete", methods=["POST"])
+def api_version_delete():
+    data = request.json
+    version = data.get("version", "")
+    if not version:
+        return jsonify({"error": "Version requerida"}), 400
+    conn = get_db_connection()
+    conn.execute("DELETE FROM version_files WHERE version = ?", (version,))
+    conn.execute("DELETE FROM versions WHERE version = ?", (version,))
+    conn.commit()
+    conn.close()
+    zip_path = VERSIONS_DIR / f"{version}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    logging.info(f"Version eliminada: {version}")
+    return jsonify({"success": True})
+
+@app.route("/api/version/<version_name>/files")
+def api_version_files(version_name):
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT filename, size FROM version_files WHERE version = ? ORDER BY filename",
+        (version_name,),
+    ).fetchall()
+    conn.close()
+    return jsonify([
+        {"filename": r[0], "size": r[1]}
+        for r in rows
+    ])
+
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     if "files" not in request.files:

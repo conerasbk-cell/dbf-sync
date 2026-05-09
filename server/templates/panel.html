@@ -100,32 +100,19 @@
 
             <div class="actions">
                 <button class="btn btn-primary" id="btnCrearVersion">&#9654; Crear Version</button>
-                <button class="btn btn-success" id="btnRefresh">&#8635; Refrescar</button>
                 <a href="/api/download" class="btn btn-secondary" id="btnDownload" style="text-decoration:none;">&#128229; Descargar ZIP</a>
-                <span style="font-size:13px;color:#888;" id="lblUploadStatus"></span>
             </div>
 
             <div class="status-bar hidden" id="statusBar"></div>
         </div>
 
-        <!-- Forzar Actualizacion -->
+        <!-- Administrar Coneras y Versiones -->
         <div class="card">
-            <h2>&#9889; Forzar Actualizacion en Coneras</h2>
-            <p style="font-size:13px;color:#888;margin-bottom:15px;">Selecciona las coneras o zonas que recibiran la actualizacion al instante.</p>
+            <h2>&#128295; Administrar</h2>
             <div class="actions" style="flex-wrap:wrap;gap:10px;">
-                <select id="forceZone" style="padding:10px;border-radius:6px;border:1px solid #ccc;font-size:14px;">
-                    <option value="__all__">Todas las zonas</option>
-                </select>
-                <select id="forceAction" style="padding:10px;border-radius:6px;border:1px solid #ccc;font-size:14px;">
-                    <option value="none">Solo actualizar archivos</option>
-                    <option value="restart">Actualizar y reiniciar POS</option>
-                    <option value="logoff">Actualizar y cerrar sesion</option>
-                </select>
-                <button class="btn btn-danger" id="btnForceUpdate">&#9889; Forzar en seleccionadas</button>
-                <button class="btn btn-danger" id="btnForceAll" style="background:#721c24;">&#9889; Forzar en TODAS</button>
+                <button class="btn btn-success" id="btnRefresh">&#8635; Refrescar</button>
+                <span style="font-size:13px;color:#888;" id="lblUploadStatus"></span>
             </div>
-            <div id="forceStatus" style="margin-top:10px;font-size:13px;color:#888;"></div>
-            <div id="forceResults" style="margin-top:10px;max-height:300px;overflow-y:auto;font-size:13px;" class="hidden"></div>
         </div>
 
         <!-- Archivos en db_uploads -->
@@ -139,18 +126,19 @@
         <!-- Historial de Versiones -->
         <div class="card">
             <h2>&#128214; Historial de Versiones</h2>
-            <div style="max-height:250px;overflow-y:auto;">
+            <div style="max-height:300px;overflow-y:auto;">
                 <table>
                     <thead>
                         <tr>
                             <th>Version</th>
                             <th>Fecha</th>
-                            <th>Archivos</th>
+                            <th>Contenido</th>
                             <th>Tamaño</th>
+                            <th style="width:50px;">Accion</th>
                         </tr>
                     </thead>
                     <tbody id="historyTable">
-                        <tr><td colspan="4" style="text-align:center;color:#888;">Cargando...</td></tr>
+                        <tr><td colspan="5" style="text-align:center;color:#888;">Cargando...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -163,7 +151,6 @@
                 <table>
                     <thead>
                         <tr>
-                            <th style="width:30px;"><input type="checkbox" id="checkAll" title="Seleccionar todas"></th>
                             <th style="width:25px;">En linea</th>
                             <th>Nombre</th>
                             <th>Zona</th>
@@ -171,13 +158,13 @@
                             <th>Ultimo Check-in</th>
                             <th>Version</th>
                             <th>Estado</th>
+                            <th style="width:50px;">Accion</th>
                         </tr>
                     </thead>
                     <tbody id="conerasTable">
                         {% if coneras %}
                             {% for c in coneras %}
-                            <tr>
-                                <td><input type="checkbox" class="conera-check" value="{{ c.name }}" data-zone="{{ c.zone }}"></td>
+                            <tr id="conera-row-{{ c.name }}">
                                 <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ '#28a745' if c.online else '#dc3545' }};" title="{{ 'En linea' if c.online else 'Desconectado' }}"></span></td>
                                 <td><strong>{{ c.name }}</strong></td>
                                 <td><span class="zone-badge" onclick="editZone(this, '{{ c.name }}')" style="cursor:pointer;border-bottom:1px dashed #aaa;" title="Click para editar zona">{{ c.zone or '-' }}</span></td>
@@ -193,6 +180,7 @@
                                         <span class="badge badge-secondary">{{ c.status }}</span>
                                     {% endif %}
                                 </td>
+                                <td><button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" onclick="deleteConera('{{ c.name }}')">&#128465;</button></td>
                             </tr>
                             {% endfor %}
                         {% else %}
@@ -256,14 +244,6 @@
             if (e.target.files.length) uploadFiles(e.target.files);
         });
 
-        // Select all checkbox
-        document.getElementById('checkAll').addEventListener('change', function() {
-            document.querySelectorAll('.conera-check').forEach(cb => cb.checked = this.checked);
-        });
-
-        // Zones tracking
-        let allConeras = [];
-
         function uploadFiles(files) {
             const formData = new FormData();
             let count = 0;
@@ -313,99 +293,46 @@
         document.getElementById('btnRefresh').addEventListener('click', refreshAll);
         document.getElementById('btnDownload').addEventListener('click', () => {});
 
-        // --- Get selected coneras ---
-        function getSelectedConeras() {
-            const checked = [];
-            document.querySelectorAll('.conera-check:checked').forEach(cb => checked.push(cb.value));
-            return checked;
-        }
-
-        function getZoneConeras(zone) {
-            if (zone === '__all__') return [];
-            return allConeras.filter(c => c.zone === zone || (!zone && !c.zone)).map(c => c.name);
-        }
-
-        // --- Force Update ---
-        function doForceUpdate(conerasList) {
-            const btn = event.target;
-            const action = document.getElementById('forceAction').value;
-            const status = document.getElementById('forceStatus');
-            const resultsDiv = document.getElementById('forceResults');
-            btn.disabled = true; btn.textContent = 'Enviando...';
-            status.textContent = 'Enviando orden a las coneras...';
-            resultsDiv.classList.add('hidden');
-            fetch('/api/force-update', {
+        // --- Delete Conera ---
+        function deleteConera(name) {
+            if (!confirm(`Eliminar conera ${name}?`)) return;
+            fetch('/api/conera/delete', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({action: action, coneras: conerasList})
+                body: JSON.stringify({name: name})
             })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
-                        showToast('Orden enviada', 'success');
-                        const actionNames = {none: 'Solo actualizar', restart: 'Reiniciar POS', logoff: 'Cerrar sesion'};
-                        status.textContent = `Orden enviada: ${actionNames[action] || action}. Esperando respuestas...`;
-                        addLog(`Actualizacion forzada: version=${data.version}, action=${action}, coneras=${conerasList.length || 'todas'}`, 'info');
-                        pollResults();
+                        showToast(`Conera ${name} eliminada`, 'success');
+                        addLog(`Conera eliminada: ${name}`, 'info');
+                        refreshAll();
                     } else {
                         showToast(data.error || 'Error', 'error');
-                        status.textContent = data.error || 'Error al enviar orden';
                     }
                 })
-                .catch(() => { showToast('Error de conexion', 'error'); status.textContent = 'Error de conexion'; })
-                .finally(() => { btn.disabled = false; btn.textContent = conerasList.length ? 'Forzar en seleccionadas' : 'Forzar en TODAS'; });
+                .catch(() => showToast('Error de conexion', 'error'));
         }
 
-        document.getElementById('btnForceUpdate').addEventListener('click', (e) => {
-            const selected = getSelectedConeras();
-            if (selected.length === 0) {
-                // Use zone filter
-                const zone = document.getElementById('forceZone').value;
-                const zoneConeras = getZoneConeras(zone);
-                if (zoneConeras.length === 0) {
-                    showToast('No hay coneras en la zona seleccionada', 'error');
-                    return;
-                }
-                e.target.closest ? doForceUpdate.call({target: e.target}, zoneConeras) : doForceUpdate(zoneConeras);
-            } else {
-                e.target.closest ? doForceUpdate.call({target: e.target}, selected) : doForceUpdate(selected);
-            }
-        });
-
-        document.getElementById('btnForceAll').addEventListener('click', (e) => {
-            e.target.closest ? doForceUpdate.call({target: e.target}, []) : doForceUpdate([]);
-        });
-
-        function pollResults() {
-            let count = 0;
-            const iv = setInterval(() => {
-                fetch('/api/force-update-results')
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data.has_results) {
-                            loadConeras();
-                            const resultsDiv = document.getElementById('forceResults');
-                            const status = document.getElementById('forceStatus');
-                            const ok = data.results.filter(r => r.acknowledged).length;
-                            const fail = data.results.filter(r => !r.acknowledged).length;
-                            status.textContent = `Respuestas: ${ok} actualizadas, ${fail} pendientes`;
-                            resultsDiv.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-                                <tr style="background:#f0f0f0;"><th>Conera</th><th>Zona</th><th>Estado</th><th>Respuesta</th></tr>
-                                ${data.results.map(r => `<tr>
-                                    <td>${r.name}</td>
-                                    <td>${r.zone || '-'}</td>
-                                    <td>${r.acknowledged ? '&#9989; OK' : '&#8987; Pendiente'}</td>
-                                    <td>${r.ack_time ? r.ack_time.slice(11,19) : '-'}</td>
-                                </tr>`).join('')}
-                            </table>`;
-                            resultsDiv.classList.remove('hidden');
-                            if (count > 12 || ok + fail >= data.total) clearInterval(iv);
-                        }
-                        count++;
-                        if (count > 12) { clearInterval(iv); document.getElementById('forceStatus').textContent += ' (tiempo agotado)'; }
-                    })
-                    .catch(() => { count++; });
-            }, 10000);
+        // --- Delete Version ---
+        function deleteVersion(version) {
+            if (!confirm(`Eliminar version ${version}? Se borraran todos sus archivos.`)) return;
+            fetch('/api/version/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({version: version})
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast(`Version ${version} eliminada`, 'success');
+                        addLog(`Version eliminada: ${version}`, 'info');
+                        refreshAll();
+                    } else {
+                        showToast(data.error || 'Error', 'error');
+                    }
+                })
+                .catch(() => showToast('Error de conexion', 'error'));
         }
 
         // --- Functions ---
@@ -432,19 +359,11 @@
             fetch('/api/coneras')
                 .then(r => r.json())
                 .then(coneras => {
-                    allConeras = coneras;
                     const tbody = document.getElementById('conerasTable');
-                    const zoneSelect = document.getElementById('forceZone');
                     if (!coneras || coneras.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;">No hay coneras registradas</td></tr>';
-                        zoneSelect.innerHTML = '<option value="__all__">Todas las zonas</option>';
                         return;
                     }
-                    // Build zone list
-                    const zones = [...new Set(coneras.map(c => c.zone || 'Sin zona'))];
-                    zoneSelect.innerHTML = '<option value="__all__">Todas las zonas</option>' +
-                        zones.map(z => `<option value="${z === 'Sin zona' ? '' : z}">${z}</option>`).join('');
-
                     tbody.innerHTML = coneras.map(c => {
                         let badge = '';
                         if (c.status === 'actualizada') badge = '<span class="badge badge-success">&#10003; Actualizada</span>';
@@ -454,8 +373,7 @@
                         const dot = c.online
                             ? '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#28a745;" title="En linea"></span>'
                             : '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#dc3545;" title="Desconectado"></span>';
-                        return `<tr>
-                            <td><input type="checkbox" class="conera-check" value="${c.name}" data-zone="${c.zone}"></td>
+                        return `<tr id="conera-row-${c.name}">
                             <td>${dot}</td>
                             <td><strong>${c.name}</strong></td>
                             <td><span onclick="editZone(this, '${c.name}')" style="cursor:pointer;border-bottom:1px dashed #aaa;" title="Click para editar zona">${zone}</span></td>
@@ -463,6 +381,7 @@
                             <td>${fmtDate(c.last_checkin)}</td>
                             <td>${c.current_version || '-'}</td>
                             <td>${badge}</td>
+                            <td><button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" onclick="deleteConera('${c.name}')">&#128465;</button></td>
                         </tr>`;
                     }).join('');
                 }).catch(() => {});
@@ -485,16 +404,39 @@
                 .then(versions => {
                     const tbody = document.getElementById('historyTable');
                     if (!versions || versions.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#888;">No hay versiones creadas aun</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">No hay versiones creadas aun</td></tr>';
                         return;
                     }
-                    tbody.innerHTML = versions.map(v => `<tr>
+                    // Load files for each version asynchronously
+                    versions.forEach(v => loadVersionFiles(v.version));
+                    tbody.innerHTML = versions.map(v => `<tr id="version-row-${v.version}">
                         <td><strong>${v.version}</strong></td>
                         <td>${fmtDate(v.created_at)}</td>
-                        <td>${v.file_count}</td>
+                        <td id="version-files-${v.version}" style="font-size:12px;">Cargando...</td>
                         <td>${v.total_size ? (v.total_size / 1048576).toFixed(2) + ' MB' : '0 MB'}</td>
+                        <td><button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" onclick="deleteVersion('${v.version}')">&#128465;</button></td>
                     </tr>`).join('');
                 }).catch(() => {});
+        }
+
+        function loadVersionFiles(version) {
+            fetch(`/api/version/${version}/files`)
+                .then(r => r.json())
+                .then(files => {
+                    const cell = document.getElementById(`version-files-${version}`);
+                    if (!cell) return;
+                    if (!files || files.length === 0) {
+                        cell.innerHTML = '<span style="color:#888;">(vacio)</span>';
+                        return;
+                    }
+                    cell.innerHTML = files.map(f =>
+                        `<span style="display:inline-block;background:#e8f0fe;padding:1px 6px;border-radius:3px;margin:1px;">${f.filename}</span>`
+                    ).join(' ');
+                })
+                .catch(() => {
+                    const cell = document.getElementById(`version-files-${version}`);
+                    if (cell) cell.innerHTML = '<span style="color:#888;">Error</span>';
+                });
         }
 
         function loadCheckinLog() {
@@ -584,7 +526,7 @@
         setInterval(loadConeras, 30000);
         setInterval(loadVersion, 30000);
         refreshAll();
-        addLog('Panel iniciado - con zonas, seleccion multiple y resultados', 'info');
+        addLog('Panel iniciado', 'info');
     </script>
 </body>
 </html>
