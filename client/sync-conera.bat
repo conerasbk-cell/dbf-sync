@@ -87,10 +87,10 @@ echo  Local: %LOCAL_VER% ^| Servidor: %VERSION%
 REM ===== PASO 4: DESCARGAR =====
 echo [4/6] Descargando...
 set ZIP_FILE=%TEMP%\dbf_sync_%VERSION%.zip
-set CHROME_ZIP=%USERPROFILE%\Downloads\%VERSION%.zip
-del "%ZIP_FILE%" "%CHROME_ZIP%" 2>nul
+set DOWNLOADS_DIR=%USERPROFILE%\Downloads
+del "%ZIP_FILE%" 2>nul
 
-REM Metodos silenciosos sin ventanas:
+REM Metodos silenciosos (sin ventanas):
 echo   - bitsadmin...
 bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
 if exist "%ZIP_FILE%" goto extraer
@@ -105,62 +105,73 @@ powershell -ExecutionPolicy Bypass -Command ^
 "try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}" >nul 2>nul
 if exist "%ZIP_FILE%" goto extraer
 
-echo   - Chrome minimizado...
 REM Buscar Chrome por rutas comunes
 set CHROME_PATH=
 for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH=%%~p
 if "%CHROME_PATH%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH=chrome.exe
+
 if not "%CHROME_PATH%"=="" (
+    echo   - Chrome (visibile)...
+    echo.
+    echo  *****************************************************
+    echo   Se abrira Chrome para descargar el ZIP.
+    echo   Cuando aparezca la descarga, guarde el archivo.
+    echo   Luego CIERRE Chrome y presione Enter para continuar.
+    echo  *****************************************************
+    echo.
     taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start /min "" "%CHROME_PATH%" --disable-gpu --no-sandbox --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-    timeout /t 10 /nobreak >nul
+    start "" "%CHROME_PATH%" --no-sandbox --disable-gpu --new-window "%SERVER_URL%/api/download/%VERSION%"
+    pause
     taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    if exist "%CHROME_ZIP%" (
-        copy /y "%CHROME_ZIP%" "%ZIP_FILE%" >nul 2>nul
-        del "%CHROME_ZIP%" 2>nul
+    for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
+        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        del "%%f" 2>nul
     )
     if exist "%ZIP_FILE%" goto extraer
 )
 
-echo   - VBScript (multi-metodo)...
-cscript //nologo "%~dp0sync-download.vbs" download "%VERSION%" >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
+REM Buscar Firefox
+set FIREFOX_PATH=
+for %%p in ("%PROGRAMFILES%\Mozilla Firefox\firefox.exe" "%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe") do if exist "%%~p" set FIREFOX_PATH=%%~p
+if "%FIREFOX_PATH%"=="" where firefox.exe >nul 2>nul && set FIREFOX_PATH=firefox.exe
 
-REM Ultimo recurso: Firefox (si Chrome no funciono)
-if not exist "%ZIP_FILE%" (
-    set FIREFOX_PATH=
-    for %%p in ("%PROGRAMFILES%\Mozilla Firefox\firefox.exe" "%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe") do if exist "%%~p" set FIREFOX_PATH=%%~p
-    if "!FIREFOX_PATH!"=="" where firefox.exe >nul 2>nul && set FIREFOX_PATH=firefox.exe
-    if not "!FIREFOX_PATH!"=="" (
-        echo   - Firefox...
-        taskkill /f /im firefox.exe >nul 2>nul
-        timeout /t 1 /nobreak >nul
-        start /min "" "!FIREFOX_PATH!" --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-        timeout /t 15 /nobreak >nul
-        taskkill /f /im firefox.exe >nul 2>nul
-        for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
-            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-            del "%%f" 2>nul
-        )
-        if exist "%ZIP_FILE%" goto extraer
+if not "%FIREFOX_PATH%"=="" (
+    echo   - Firefox (visible)...
+    echo.
+    echo  *****************************************************
+    echo   Se abrira Firefox para descargar el ZIP.
+    echo   Guarde el archivo, cierre Firefox y presione Enter.
+    echo  *****************************************************
+    echo.
+    taskkill /f /im firefox.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
+    start "" "%FIREFOX_PATH%" --new-window "%SERVER_URL%/api/download/%VERSION%"
+    pause
+    taskkill /f /im firefox.exe >nul 2>nul
+    for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
+        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        del "%%f" 2>nul
     )
+    if exist "%ZIP_FILE%" goto extraer
 )
 
+REM Nada funciono
+echo.
+echo  ERROR: No se pudo descargar automaticamente.
+echo.
+echo  Abra Chrome y navegue a:
+echo  %SERVER_URL%/api/download/%VERSION%
+echo.
+echo  Guarde el archivo ZIP en:
+echo  %ZIP_FILE%
+echo.
+echo  Luego presione Enter para continuar...
+pause
 if not exist "%ZIP_FILE%" (
-    echo.
-    echo  ERROR: No se pudo descargar
-    echo  URL: %SERVER_URL%/api/download/%VERSION%
-    echo.
-    echo  Descargue manualmente y copie a:
-    echo  %ZIP_FILE%
-    echo  Luego presione Enter para continuar
-    pause
-    if not exist "%ZIP_FILE%" (
-        echo  Continuando sin actualizar...
-        goto checkin_and_loop
-    )
+    echo  Continuando sin actualizar...
+    goto checkin_and_loop
 )
 
 :extraer
@@ -202,11 +213,13 @@ powershell -ExecutionPolicy Bypass -Command ^
 "try { $w = New-Object Net.WebClient; $w.DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') } catch {}; " ^
 "try { $w.DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') } catch {}" >nul 2>nul
 
-REM Ultimo recurso: browser headless (Chrome/Firefox tienen TLS propio)
-where chrome.exe >nul 2>nul
-if !errorlevel! equ 0 (
-    start /min "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%" >nul 2>nul
-    start /min "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >nul 2>nul
+REM Buscar Chrome para check-in
+set CHROME_PATH2=
+for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH2=%%~p
+if "%CHROME_PATH2%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH2=chrome.exe
+if not "%CHROME_PATH2%"=="" (
+    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%" >nul 2>nul
+    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >nul 2>nul
 )
 timeout /t 3 /nobreak >nul
 echo  OK
