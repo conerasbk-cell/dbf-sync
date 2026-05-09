@@ -256,60 +256,36 @@ echo   Hora: %date% %time%
 echo =============================================
 echo.
 
-REM ===== LOOP CADA 5 MINUTOS =====
-echo  Entrando en modo vigilancia (check-in cada 5 minutos)
-echo  Cierre la ventana para detener
+REM ===== CREAR TAREA PROGRAMADA =====
+echo.
+echo  Creando tarea programada para check-in cada 5 minutos...
+echo  (La ventana se cerrara, la tarea corre en segundo plano)
 echo.
 
-:LOOP_5MIN
-timeout /t 300 /nobreak >nul
+set TASK_NAME=DBF_Sync_%CONERA%
+set TASK_SCRIPT="%~dp0sync-download.vbs"
 
-REM Verificar version sin mostrar toda la pantalla
-title DBF Sync - %CONERA% - verificando...
-set OLD_VERSION=%VERSION%
-set VERSION=
+REM Eliminar tarea anterior si existe
+schtasks /delete /tn "%TASK_NAME%" /f >nul 2>nul
 
-cscript //nologo "%~dp0sync-download.vbs" version > "%TEMP%\dbf_version.txt" 2>nul
-set /p VERSION=<"%TEMP%\dbf_version.txt"
+REM Crear tarea cada 5 minutos
+schtasks /create /tn "%TASK_NAME%" /tr "cscript //nologo \"%TASK_SCRIPT%\" checkin \"%VERSION%\"" /sc minute /mo 5 /f >nul 2>nul
 
-if "%VERSION%"=="" (
-    powershell -ExecutionPolicy Bypass -Command ^
-"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
-"try { $w = New-Object Net.WebClient; $r = $w.DownloadString('%SERVER_URL%/api/version'); " ^
-"$m = [regex]::Match($r, '\"\"version\"\":\s*\"\"([^\"]+)\"\"'); if($m.Success){$m.Groups[1].Value}else{''} " ^
-"} catch { '' }" > "%TEMP%\dbf_version2.txt" 2>nul
-    set /p VERSION=<"%TEMP%\dbf_version2.txt"
+if %errorlevel% equ 0 (
+    echo  Tarea creada: %TASK_NAME% (cada 5 min)
+) else (
+    echo  [!] No se pudo crear tarea programada
+    echo  El check-in automatico no estara activo
+    pause
 )
 
-if "%VERSION%"=="" (
-    title DBF Sync - %CONERA% - sin conexion
-    goto checkin_loop
-)
-
-if not "%VERSION%"=="%OLD_VERSION%" (
-    echo [%date% %time%] Nueva version detectada: %VERSION%
-    title DBF Sync - %CONERA% - actualizando a %VERSION%
-    goto UPDATE_CYCLE
-)
-
-:checkin_loop
-title DBF Sync - %CONERA% - esperando
-
-REM VBScript
-cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
-REM PowerShell fallback
-powershell -ExecutionPolicy Bypass -Command ^
-"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
-"try { $w = New-Object Net.WebClient; $w.DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') } catch {}" >nul 2>nul
-REM Browser fallback (Chrome)
-where chrome.exe >nul 2>nul
-if !errorlevel! equ 0 (
-    start /min "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >nul 2>nul
-)
-
-del "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
-
-echo [%date% %time%] Check-in: %VERSION%
-
-title DBF Sync - %CONERA% - OK
-goto LOOP_5MIN
+echo.
+echo =============================================
+echo   Actualizado: %VERSION%
+echo   Check-in automatico cada 5 minutos
+echo   Tarea: %TASK_NAME%
+echo =============================================
+echo.
+echo  Presione Enter para cerrar...
+pause >nul
+exit /b 0

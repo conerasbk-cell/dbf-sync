@@ -57,7 +57,12 @@ Sub LoadConfig()
         On Error Goto 0
     End If
     If strServerUrl = "" Then strServerUrl = "https://dbf-sync.onrender.com"
-    If strConeraName = "" Then strConeraName = "CONERA"
+    If strConeraName = "" Then
+        On Error Resume Next
+        strConeraName = shell.ExpandEnvironmentStrings("%COMPUTERNAME%")
+        If strConeraName = "%COMPUTERNAME%" Then strConeraName = "CONERA"
+        On Error Goto 0
+    End If
     If strDataDir = "" Then strDataDir = "C:\Bootdrv\AlohaQs\DATA"
     If strNewDataDir = "" Then strNewDataDir = "C:\Bootdrv\AlohaQs\NEWDATA"
     If strVersionFile = "" Then strVersionFile = "C:\Bootdrv\AlohaQs\version.txt"
