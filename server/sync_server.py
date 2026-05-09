@@ -315,6 +315,13 @@ def api_download():
         return jsonify({"error": "Archivo no encontrado"}), 404
     return send_file(str(zip_path), as_attachment=True, download_name=f"{v['version']}.zip")
 
+@app.route("/api/download/<version_name>", methods=["GET"])
+def api_download_version(version_name):
+    zip_path = VERSIONS_DIR / f"{version_name}.zip"
+    if not zip_path.exists():
+        return jsonify({"error": "Version no encontrada"}), 404
+    return send_file(str(zip_path), as_attachment=True, download_name=f"{version_name}.zip")
+
 @app.route("/api/coneras")
 def api_coneras():
     return jsonify(get_coneras_list())
@@ -335,22 +342,33 @@ def api_create_version():
         logging.error(f"Error en create-version: {e}", exc_info=True)
         return jsonify({"error": f"Error interno: {type(e).__name__}: {e}"}), 500
 
-@app.route("/api/conera/checkin", methods=["POST"])
+@app.route("/api/conera/checkin", methods=["GET", "POST"])
 def api_conera_checkin():
-    data = request.json
-    name = data.get("name", "desconocida")
-    ip = request.remote_addr or data.get("ip", "")
-    version = data.get("version", "")
-    zone = data.get("zone", "")
+    if request.method == "GET":
+        name = request.args.get("name", "desconocida")
+        ip = request.remote_addr or ""
+        version = request.args.get("version", "")
+        zone = request.args.get("zone", "")
+    else:
+        data = request.json
+        name = data.get("name", "desconocida")
+        ip = request.remote_addr or data.get("ip", "")
+        version = data.get("version", "")
+        zone = data.get("zone", "")
     register_conera(name, ip, version, zone)
     return jsonify({"success": True})
 
-@app.route("/api/conera/register", methods=["POST"])
+@app.route("/api/conera/register", methods=["GET", "POST"])
 def api_conera_register():
-    data = request.json
-    name = data.get("name", "desconocida")
-    ip = request.remote_addr or data.get("ip", "")
-    zone = data.get("zone", "")
+    if request.method == "GET":
+        name = request.args.get("name", "desconocida")
+        ip = request.remote_addr or ""
+        zone = request.args.get("zone", "")
+    else:
+        data = request.json
+        name = data.get("name", "desconocida")
+        ip = request.remote_addr or data.get("ip", "")
+        zone = data.get("zone", "")
     conn = get_db_connection()
     rows = conn.execute("SELECT id FROM coneras WHERE name = ?", (name,)).fetchall()
     if not rows:

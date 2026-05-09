@@ -169,15 +169,68 @@ End Sub
 Function CreateHttp()
     Dim obj
     On Error Resume Next
-    Set obj = CreateObject("MSXML2.XMLHTTP.3.0")
-    If Err.Number <> 0 Then
-        Set obj = CreateObject("MSXML2.ServerXMLHTTP.6.0")
-    End If
+    Set obj = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     If Err.Number <> 0 Then
         Set obj = CreateObject("WinHttp.WinHttpRequest.5.1")
     End If
+    If Err.Number <> 0 Then
+        Set obj = CreateObject("MSXML2.XMLHTTP.3.0")
+    End If
     On Error Goto 0
     Set CreateHttp = obj
+End Function
+
+Function TryAllComMethods(url, jsonData, isBinary, savePath)
+    Dim methods, i, methodName, obj, ado
+    methods = Array( _
+        "WinHttp.WinHttpRequest.5.1", _
+        "MSXML2.ServerXMLHTTP.6.0", _
+        "MSXML2.ServerXMLHTTP.3.0", _
+        "MSXML2.ServerXMLHTTP", _
+        "MSXML2.XMLHTTP.6.0", _
+        "MSXML2.XMLHTTP.3.0", _
+        "MSXML2.XMLHTTP", _
+        "Microsoft.XMLHTTP", _
+        "MSXML2.ServerXMLHTTP.5.0", _
+        "MSXML2.ServerXMLHTTP.4.0", _
+        "MSXML2.XMLHTTP.5.0", _
+        "MSXML2.XMLHTTP.4.0", _
+        "WinHttp.WinHttpRequest" _
+    )
+    On Error Resume Next
+    For i = 0 To UBound(methods)
+        methodName = methods(i)
+        Set obj = Nothing
+        Set obj = CreateObject(methodName)
+        If Err.Number = 0 Then
+            If InStr(methodName, "WinHttp") > 0 Then
+                obj.Option(9) = 4096 ' TLS 1.2 only
+            End If
+            obj.Open "POST", url, False
+            obj.SetRequestHeader "Content-Type", "application/json"
+            obj.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+            obj.Send jsonData
+            If Err.Number = 0 And obj.Status = 200 Then
+                If isBinary Then
+                    Set ado = CreateObject("ADODB.Stream")
+                    ado.Type = 1
+                    ado.Open
+                    ado.Write obj.ResponseBody
+                    ado.SaveToFile savePath, 2
+                    ado.Close
+                    TryAllComMethods = True
+                Else
+                    TryAllComMethods = obj.ResponseText
+                End If
+                Set obj = Nothing
+                On Error Goto 0
+                Exit Function
+            End If
+        End If
+        Err.Clear
+    Next
+    On Error Goto 0
+    TryAllComMethods = ""
 End Function
 
 Function HttpGet(url)
@@ -228,53 +281,114 @@ Function HttpGetJsonBool(jsonText, key)
 End Function
 
 Function HttpPostJson(url, jsonData)
-    Dim http
-    Set http = CreateHttp()
-    On Error Resume Next
-    http.Open "POST", url, False
-    http.SetRequestHeader "Content-Type", "application/json"
-    http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
-    http.Send jsonData
-    If Err.Number <> 0 Then
-        LogError "HttpPostJson error: " & Err.Description & " (url: " & url & ")"
-        HttpPostJson = ""
+    Dim result
+    result = TryAllComMethods(url, jsonData, False, "")
+    If result <> "" Then
+        HttpPostJson = result
         Exit Function
     End If
-    On Error Goto 0
-    If http.Status = 200 Then
-        HttpPostJson = http.ResponseText
-    Else
-        LogError "HttpPostJson status: " & http.Status & " (url: " & url & ")"
-        HttpPostJson = ""
-    End If
+    HttpPostJson = HttpPostJsonPowerShell(url, jsonData)
 End Function
 
 Function HttpPostBinary(url, jsonData, savePath)
-    Dim http, ado
-    Set http = CreateHttp()
+    Dim comResult
+    comResult = TryAllComMethods(url, jsonData, True, savePath)
+    If comResult = True Then
+        HttpPostBinary = True
+        Exit Function
+    End If
+    HttpPostBinary = HttpPostBinaryPowerShell(url, jsonData, savePath)
+End Function
+
+' ===========================================
+' POWERSHELL FALLBACK - Ultimate fallback when no COM object handles TLS 1.2
+' ===========================================
+Sub WriteTempFile(path, content)
+    Dim f
+    Set f = fso.CreateTextFile(path, True)
+    f.Write content
+    f.Close
+End Sub
+
+Function ExecPowerShell(psScriptContent)
+    Dim tmpDir, psFile, resultFile, result, shellExec
+    tmpDir = fso.GetSpecialFolder(2)
+    psFile = tmpDir & "\dbf_sync_ps.ps1"
+    resultFile = tmpDir & "\dbf_sync_ps_result.txt"
+    WriteTempFile psFile, psScriptContent
     On Error Resume Next
-    http.Open "POST", url, False
-    http.SetRequestHeader "Content-Type", "application/json"
-    http.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
-    http.Send jsonData
-    If Err.Number <> 0 Then
-        LogError "HttpPostBinary error: " & Err.Description & " (url: " & url & ")"
-        HttpPostBinary = False
-        Exit Function
-    End If
+    Set shellExec = CreateObject("WScript.Shell")
+    shellExec.Run "powershell -ExecutionPolicy Bypass -File """ & psFile & """", 0, True
     On Error Goto 0
-    If http.Status <> 200 Then
-        LogError "HttpPostBinary status: " & http.Status & " (url: " & url & ")"
-        HttpPostBinary = False
-        Exit Function
+    If fso.FileExists(resultFile) Then
+        Dim inFile
+        Set inFile = fso.OpenTextFile(resultFile, 1)
+        result = inFile.ReadAll()
+        inFile.Close
+        fso.DeleteFile resultFile, True
+    Else
+        result = ""
     End If
-    Set ado = CreateObject("ADODB.Stream")
-    ado.Type = 1
-    ado.Open
-    ado.Write http.ResponseBody
-    ado.SaveToFile savePath, 2
-    ado.Close
-    HttpPostBinary = True
+    fso.DeleteFile psFile, True
+    ExecPowerShell = result
+End Function
+
+Function HttpPostJsonPowerShell(url, jsonData)
+    Dim tmpDir, dataFile, psContent, result
+    tmpDir = fso.GetSpecialFolder(2)
+    dataFile = tmpDir & "\dbf_sync_post_data.txt"
+    WriteTempFile dataFile, jsonData
+    psContent = "$url = '" & url & "'" & vbCrLf & _
+                "$dataFile = '" & dataFile & "'" & vbCrLf & _
+                "$resultFile = '" & tmpDir & "\dbf_sync_ps_result.txt'" & vbCrLf & _
+                "Try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } Catch { }" & vbCrLf & _
+                "Try {" & vbCrLf & _
+                "  $body = [System.IO.File]::ReadAllText($dataFile)" & vbCrLf & _
+                "  $wc = New-Object System.Net.WebClient" & vbCrLf & _
+                "  $wc.Headers.Add('Content-Type', 'application/json')" & vbCrLf & _
+                "  $wc.Headers.Add('User-Agent', 'DBF-Sync-Client/1.0')" & vbCrLf & _
+                "  $result = $wc.UploadString($url, 'POST', $body)" & vbCrLf & _
+                "  $result | Out-File $resultFile -Encoding UTF8" & vbCrLf & _
+                "} Catch { }"
+    On Error Resume Next
+    result = ExecPowerShell(psContent)
+    fso.DeleteFile dataFile, True
+    On Error Goto 0
+    If result <> "" Then
+        HttpPostJsonPowerShell = result
+    Else
+        LogError "HttpPostJson error: " & Err.Description & " (url: " & url & ")"
+        HttpPostJsonPowerShell = ""
+    End If
+End Function
+
+Function HttpPostBinaryPowerShell(url, jsonData, savePath)
+    Dim tmpDir, dataFile, psContent, result
+    tmpDir = fso.GetSpecialFolder(2)
+    dataFile = tmpDir & "\dbf_sync_post_data.txt"
+    WriteTempFile dataFile, jsonData
+    psContent = "$url = '" & url & "'" & vbCrLf & _
+                "$dataFile = '" & dataFile & "'" & vbCrLf & _
+                "$outputFile = '" & savePath & "'" & vbCrLf & _
+                "Try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } Catch { }" & vbCrLf & _
+                "Try {" & vbCrLf & _
+                "  $body = [System.IO.File]::ReadAllText($dataFile)" & vbCrLf & _
+                "  $wc = New-Object System.Net.WebClient" & vbCrLf & _
+                "  $wc.Headers.Add('Content-Type', 'application/json')" & vbCrLf & _
+                "  $wc.Headers.Add('User-Agent', 'DBF-Sync-Client/1.0')" & vbCrLf & _
+                "  $bytes = $wc.UploadData($url, 'POST', [System.Text.Encoding]::UTF8.GetBytes($body))" & vbCrLf & _
+                "  [System.IO.File]::WriteAllBytes($outputFile, $bytes)" & vbCrLf & _
+                "} Catch { }"
+    On Error Resume Next
+    result = ExecPowerShell(psContent)
+    fso.DeleteFile dataFile, True
+    On Error Goto 0
+    If fso.FileExists(savePath) Then
+        HttpPostBinaryPowerShell = True
+    Else
+        LogError "HttpPostBinary error: " & Err.Description & " (url: " & url & ")"
+        HttpPostBinaryPowerShell = False
+    End If
 End Function
 
 Sub ExtractZip(zipPath, destPath)
@@ -420,47 +534,29 @@ Function CheckForceUpdate()
 
     Dim ackData
     ackData = "{""name"":""" & strConeraName & """,""status"":""" & CStr(downloaded) & """}"
-    Dim http
-    Set http = CreateHttp()
-    On Error Resume Next
-    http.Open "POST", strServerUrl & "/api/force-update-ack", False
-    http.SetRequestHeader "Content-Type", "application/json"
-    http.Send ackData
-    On Error Goto 0
+    HttpPostJson strServerUrl & "/api/force-update-ack", ackData
 
     CheckForceUpdate = True
 End Function
 
 Sub CheckIn(version)
-    Dim url, http
-    url = strServerUrl & "/api/conera/checkin"
-    Set http = CreateHttp()
-    On Error Resume Next
-    http.Open "POST", url, False
-    http.SetRequestHeader "Content-Type", "application/json"
-    http.Send "{""name"":""" & strConeraName & """,""version"":""" & version & """}"
-    If Err.Number = 0 And http.Status = 200 Then
+    Dim resp
+    resp = HttpPostJson(strServerUrl & "/api/conera/checkin", "{""name"":""" & strConeraName & """,""version"":""" & version & """}")
+    If resp <> "" Then
         Log "Check-in enviado: " & version
     Else
-        LogError "Error en check-in: " & Err.Description
+        LogError "Error en check-in"
     End If
-    On Error Goto 0
 End Sub
 
 Sub Register()
-    Dim url, http
-    url = strServerUrl & "/api/conera/register"
-    Set http = CreateHttp()
-    On Error Resume Next
-    http.Open "POST", url, False
-    http.SetRequestHeader "Content-Type", "application/json"
-    http.Send "{""name"":""" & strConeraName & """}"
-    If Err.Number = 0 And http.Status = 200 Then
+    Dim resp
+    resp = HttpPostJson(strServerUrl & "/api/conera/register", "{""name"":""" & strConeraName & """}")
+    If resp <> "" Then
         Log "Registrado en servidor"
     Else
-        LogError "Error al registrar: " & Err.Description
+        LogError "Error al registrar"
     End If
-    On Error Goto 0
 End Sub
 
 ' ===========================================
