@@ -226,8 +226,24 @@ echo  OK
 REM ===== CHECK-IN =====
 :checkin_and_loop
 echo [6/6] Enviando check-in...
+
+REM Intentar VBScript (multi-metodo COM)
 cscript //nologo "%~dp0sync-download.vbs" register >nul 2>nul
 cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
+
+REM Fallback PowerShell (.NET con TLS 1.2)
+powershell -ExecutionPolicy Bypass -Command ^
+"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
+"try { $w = New-Object Net.WebClient; $w.DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') } catch {}; " ^
+"try { $w.DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') } catch {}" >nul 2>nul
+
+REM Ultimo recurso: browser headless (Chrome/Firefox tienen TLS propio)
+where chrome.exe >nul 2>nul
+if !errorlevel! equ 0 (
+    start /min "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%" >nul 2>nul
+    start /min "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >nul 2>nul
+)
+timeout /t 3 /nobreak >nul
 echo  OK
 
 del "%ZIP_FILE%" "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
@@ -278,7 +294,19 @@ if not "%VERSION%"=="%OLD_VERSION%" (
 
 :checkin_loop
 title DBF Sync - %CONERA% - esperando
+
+REM VBScript
 cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
+REM PowerShell fallback
+powershell -ExecutionPolicy Bypass -Command ^
+"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
+"try { $w = New-Object Net.WebClient; $w.DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') } catch {}" >nul 2>nul
+REM Browser fallback (Chrome)
+where chrome.exe >nul 2>nul
+if !errorlevel! equ 0 (
+    start /min "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >nul 2>nul
+)
+
 del "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
 
 echo [%date% %time%] Check-in: %VERSION%
