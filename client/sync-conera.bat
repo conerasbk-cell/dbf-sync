@@ -116,9 +116,10 @@ echo  Local: %LOCAL_VER% ^| Servidor: %VERSION%
 REM ===== PASO 4: DESCARGAR =====
 echo [4/6] Descargando...
 set ZIP_FILE=%TEMP%\dbf_sync_%VERSION%.zip
-del "%ZIP_FILE%" 2>nul
+set CHROME_ZIP=%USERPROFILE%\Downloads\%VERSION%.zip
+del "%ZIP_FILE%" "%CHROME_ZIP%" 2>nul
 
-REM Siempre probar metodos silenciosos primero (sin ventanas):
+REM Metodos silenciosos sin ventanas:
 echo   - bitsadmin...
 bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
 if exist "%ZIP_FILE%" goto extraer
@@ -133,52 +134,36 @@ powershell -ExecutionPolicy Bypass -Command ^
 "try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}" >nul 2>nul
 if exist "%ZIP_FILE%" goto extraer
 
+echo   - Chrome minimizado...
+taskkill /f /im chrome.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
+start /min "" chrome --disable-gpu --no-sandbox --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+timeout /t 10 /nobreak >nul
+taskkill /f /im chrome.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
+if exist "%CHROME_ZIP%" (
+    copy /y "%CHROME_ZIP%" "%ZIP_FILE%" >nul 2>nul
+    del "%CHROME_ZIP%" 2>nul
+)
+if exist "%ZIP_FILE%" goto extraer
+
 echo   - VBScript (multi-metodo)...
 cscript //nologo "%~dp0sync-download.vbs" download "%VERSION%" >nul 2>nul
 if exist "%ZIP_FILE%" goto extraer
 
-REM Ultimo recurso: abrir navegador (ventana visible)
-echo.
-echo   [!] Metodos silenciosos fallaron.
-echo   Abriendo %BROWSER_MODE% como ultimo recurso...
-
-if "%BROWSER_MODE%"=="chrome" (
-    where chrome.exe >nul 2>nul
-    if !errorlevel! equ 0 (
-        start /wait "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-        timeout /t 5 /nobreak >nul
-        for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
-            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        )
-    )
-)
-if "%BROWSER_MODE%"=="firefox" (
+REM Ultimo recurso: Firefox headless (si Chrome no estaba)
+if not exist "%ZIP_FILE%" (
     where firefox.exe >nul 2>nul
     if !errorlevel! equ 0 (
-        start /wait "" firefox --headless "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-        timeout /t 5 /nobreak >nul
+        echo   - Firefox...
+        taskkill /f /im firefox.exe >nul 2>nul
+        timeout /t 1 /nobreak >nul
+        start /min "" firefox --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+        timeout /t 15 /nobreak >nul
+        taskkill /f /im firefox.exe >nul 2>nul
         for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
             copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        )
-    )
-)
-if "%BROWSER_MODE%"=="auto" (
-    where chrome.exe >nul 2>nul
-    if !errorlevel! equ 0 (
-        start /wait "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-        timeout /t 5 /nobreak >nul
-        for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
-            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        )
-    )
-    if not exist "%ZIP_FILE%" (
-        where firefox.exe >nul 2>nul
-        if !errorlevel! equ 0 (
-            start /wait "" firefox --headless "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-            timeout /t 5 /nobreak >nul
-            for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
-                copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-            )
+            del "%%f" 2>nul
         )
     )
 )

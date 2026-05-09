@@ -436,12 +436,12 @@ Function DownloadZip(version)
         Exit Function
     End If
     
-    ' Try browser navigation (triggers download to user's Downloads folder)
+    ' Try Chrome (hidden, triggers download to Downloads folder)
     Dim browserPath
     browserPath = FindChrome()
     If browserPath <> "" Then
-        shell.Run """" & browserPath & """ """ & url & """", 1, False
-        WScript.Sleep 5000
+        shell.Run """" & browserPath & """ """ & url & """", 0, False
+        WScript.Sleep 8000
         ' Check common downloads folder
         Dim dlFolder
         dlFolder = shell.ExpandEnvironmentStrings("%USERPROFILE%\Downloads")
