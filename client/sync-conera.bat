@@ -31,40 +31,11 @@ echo DATA: %DATA_DIR%
 echo NEWDATA: %NEWDATA_DIR%
 echo.
 
-REM ===== MENU =====
-:MENU
-cls
-echo =============================================
-echo   Seleccione navegador (fallback si todo falla):
-echo =============================================
-echo.
-echo   1. Google Chrome
-echo   2. Mozilla Firefox
-echo   3. Automatico (prueba todo, abre navegador solo si es necesario)
-echo.
-set BROWSER=
-set /p BROWSER="Opcion (1-3): "
-if "%BROWSER%"=="1" set BROWSER_MODE=chrome
-if "%BROWSER%"=="2" set BROWSER_MODE=firefox
-if "%BROWSER%"=="3" set BROWSER_MODE=auto
-if "%BROWSER_MODE%"=="" goto MENU
-
-echo.
-echo  Seleccionado: %BROWSER_MODE%
-echo.
-echo  NOTA: Primero se intentan metodos silenciosos
-echo  (PowerShell, bitsadmin, certutil, VBScript).
-echo  El navegador solo se abre si esos fallan.
-echo.
-echo  Presione Enter para comenzar...
-pause >nul
-
 REM ===== MAIN UPDATE CYCLE =====
 :UPDATE_CYCLE
 cls
 echo =============================================
 echo   DBF Sync - %CONERA%
-echo   Modo: %BROWSER_MODE%
 echo =============================================
 echo.
 
@@ -135,36 +106,45 @@ powershell -ExecutionPolicy Bypass -Command ^
 if exist "%ZIP_FILE%" goto extraer
 
 echo   - Chrome minimizado...
-taskkill /f /im chrome.exe >nul 2>nul
-timeout /t 1 /nobreak >nul
-start /min "" chrome --disable-gpu --no-sandbox --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
-timeout /t 10 /nobreak >nul
-taskkill /f /im chrome.exe >nul 2>nul
-timeout /t 1 /nobreak >nul
-if exist "%CHROME_ZIP%" (
-    copy /y "%CHROME_ZIP%" "%ZIP_FILE%" >nul 2>nul
-    del "%CHROME_ZIP%" 2>nul
+REM Buscar Chrome por rutas comunes
+set CHROME_PATH=
+for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH=%%~p
+if "%CHROME_PATH%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH=chrome.exe
+if not "%CHROME_PATH%"=="" (
+    taskkill /f /im chrome.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
+    start /min "" "%CHROME_PATH%" --disable-gpu --no-sandbox --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    timeout /t 10 /nobreak >nul
+    taskkill /f /im chrome.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
+    if exist "%CHROME_ZIP%" (
+        copy /y "%CHROME_ZIP%" "%ZIP_FILE%" >nul 2>nul
+        del "%CHROME_ZIP%" 2>nul
+    )
+    if exist "%ZIP_FILE%" goto extraer
 )
-if exist "%ZIP_FILE%" goto extraer
 
 echo   - VBScript (multi-metodo)...
 cscript //nologo "%~dp0sync-download.vbs" download "%VERSION%" >nul 2>nul
 if exist "%ZIP_FILE%" goto extraer
 
-REM Ultimo recurso: Firefox headless (si Chrome no estaba)
+REM Ultimo recurso: Firefox (si Chrome no funciono)
 if not exist "%ZIP_FILE%" (
-    where firefox.exe >nul 2>nul
-    if !errorlevel! equ 0 (
+    set FIREFOX_PATH=
+    for %%p in ("%PROGRAMFILES%\Mozilla Firefox\firefox.exe" "%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe") do if exist "%%~p" set FIREFOX_PATH=%%~p
+    if "!FIREFOX_PATH!"=="" where firefox.exe >nul 2>nul && set FIREFOX_PATH=firefox.exe
+    if not "!FIREFOX_PATH!"=="" (
         echo   - Firefox...
         taskkill /f /im firefox.exe >nul 2>nul
         timeout /t 1 /nobreak >nul
-        start /min "" firefox --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+        start /min "" "!FIREFOX_PATH!" --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
         timeout /t 15 /nobreak >nul
         taskkill /f /im firefox.exe >nul 2>nul
         for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
             copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
             del "%%f" 2>nul
         )
+        if exist "%ZIP_FILE%" goto extraer
     )
 )
 
