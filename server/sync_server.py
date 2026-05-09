@@ -3,6 +3,7 @@ import json
 import time
 import shutil
 import hashlib
+import base64
 import zipfile
 import logging
 from datetime import datetime, timedelta
@@ -102,6 +103,7 @@ def _ensure_turso_tables(c):
         "CREATE TABLE IF NOT EXISTS versions (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, created_at TEXT NOT NULL, file_count INTEGER DEFAULT 0, total_size INTEGER DEFAULT 0, checksum TEXT)",
         "CREATE TABLE IF NOT EXISTS coneras (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, ip TEXT, zone TEXT DEFAULT '', last_checkin TEXT, current_version TEXT, status TEXT DEFAULT 'pendiente')",
         "CREATE TABLE IF NOT EXISTS force_update (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, action TEXT DEFAULT 'none', created_at TEXT NOT NULL, acks TEXT DEFAULT '[]')",
+        "CREATE TABLE IF NOT EXISTS version_files (id INTEGER PRIMARY KEY AUTOINCREMENT, version TEXT NOT NULL, filename TEXT NOT NULL, data_b64 TEXT NOT NULL, size INTEGER DEFAULT 0)",
     ]:
         try:
             c.execute(sql).fetchall()
@@ -171,6 +173,18 @@ def init_db():
             acks TEXT DEFAULT '[]'
         )
     """)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS version_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                data_b64 TEXT NOT NULL,
+                size INTEGER DEFAULT 0
+            )
+        """)
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -221,6 +235,16 @@ def create_version_from_uploads():
         "INSERT INTO versions (version, created_at, file_count, total_size, checksum) VALUES (?, ?, ?, ?, ?)",
         (version_name, datetime.now().isoformat(), len(files), total_size, checksum),
     )
+
+    for f in files:
+        with open(f, "rb") as fh:
+            data = fh.read()
+        data_b64 = base64.b64encode(data).decode("ascii")
+        conn.execute(
+            "INSERT INTO version_files (version, filename, data_b64, size) VALUES (?, ?, ?, ?)",
+            (version_name, f.name, data_b64, len(data)),
+        )
+
     conn.commit()
     conn.close()
 
@@ -247,6 +271,25 @@ def get_coneras_list():
             "online": online,
         })
     return result
+
+def ensure_version_zip(version_name):
+    zip_path = VERSIONS_DIR / f"{version_name}.zip"
+    if zip_path.exists():
+        return zip_path
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT filename, data_b64 FROM version_files WHERE version = ? ORDER BY id",
+        (version_name,),
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for row in rows:
+            data = base64.b64decode(row[1])
+            zf.writestr(row[0], data)
+    logging.info(f"ZIP reconstruido desde Turso: {version_name}")
+    return zip_path
 
 def register_conera(name, ip, version, zone=""):
     conn = get_db_connection()
@@ -310,15 +353,15 @@ def api_download():
     v = get_current_version()
     if not v:
         return jsonify({"error": "No hay version disponible"}), 404
-    zip_path = VERSIONS_DIR / f"{v['version']}.zip"
-    if not zip_path.exists():
-        return jsonify({"error": "Archivo no encontrado"}), 404
+    zip_path = ensure_version_zip(v["version"])
+    if not zip_path:
+        return jsonify({"error": "Archivo no encontrado en Turso"}), 404
     return send_file(str(zip_path), as_attachment=True, download_name=f"{v['version']}.zip")
 
 @app.route("/api/download/<version_name>", methods=["GET"])
 def api_download_version(version_name):
-    zip_path = VERSIONS_DIR / f"{version_name}.zip"
-    if not zip_path.exists():
+    zip_path = ensure_version_zip(version_name)
+    if not zip_path:
         return jsonify({"error": "Version no encontrada"}), 404
     return send_file(str(zip_path), as_attachment=True, download_name=f"{version_name}.zip")
 
