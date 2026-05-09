@@ -2,6 +2,8 @@
 setlocal enabledelayedexpansion
 
 title DBF Sync - %COMPUTERNAME%
+set LOG_FILE=%TEMP%\dbf_sync_%COMPUTERNAME%.log
+echo [%date% %time%] INICIO > "%LOG_FILE%"
 
 echo =============================================
 echo   DBF Sync Conera - Actualizacion Manual
@@ -30,6 +32,7 @@ echo Servidor: %SERVER_URL%
 echo DATA: %DATA_DIR%
 echo NEWDATA: %NEWDATA_DIR%
 echo.
+echo [%date% %time%] CONFIG: %CONERA% %SERVER_URL% >> "%LOG_FILE%"
 
 REM ===== MAIN UPDATE CYCLE =====
 :UPDATE_CYCLE
@@ -43,11 +46,12 @@ REM ===== PASO 1: TLS =====
 echo [1/6] Activando TLS 1.2...
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f >nul 2>nul
 echo  OK
+echo [%date% %time%] PASO1 TLS OK >> "%LOG_FILE%"
 
 REM ===== PASO 2: VERSION =====
 echo [2/6] Obteniendo version del servidor...
 set VERSION=
-cscript //nologo "%~dp0sync-download.vbs" version > "%TEMP%\dbf_version.txt" 2>nul
+cscript //nologo "%~dp0sync-download.vbs" version > "%TEMP%\dbf_version.txt" 2>>"%LOG_FILE%"
 set /p VERSION=<"%TEMP%\dbf_version.txt"
 
 if "%VERSION%"=="" (
@@ -56,12 +60,13 @@ if "%VERSION%"=="" (
 "try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
 "try { $w = New-Object Net.WebClient; $r = $w.DownloadString('%SERVER_URL%/api/version'); " ^
 "$m = [regex]::Match($r, '\"\"version\"\":\s*\"\"([^\"]+)\"\"'); if($m.Success){$m.Groups[1].Value}else{''} " ^
-"} catch { '' }" > "%TEMP%\dbf_version2.txt" 2>nul
+"} catch { '' }" > "%TEMP%\dbf_version2.txt" 2>>"%LOG_FILE%"
     set /p VERSION=<"%TEMP%\dbf_version2.txt"
 )
 
 if "%VERSION%"=="" (
     echo  ERROR: No se pudo conectar al servidor
+    echo [%date% %time%] ERROR: No se obtuvo version >> "%LOG_FILE%"
     echo.
     echo  Verifique internet y que el servidor este desplegado
     echo  %SERVER_URL%/api/version
@@ -71,6 +76,7 @@ if "%VERSION%"=="" (
     exit /b 1
 )
 echo  OK: %VERSION%
+echo [%date% %time%] PASO2 VERSION: %VERSION% >> "%LOG_FILE%"
 
 REM ===== PASO 3: COMPARAR =====
 echo [3/6] Verificando version local...
@@ -80,9 +86,11 @@ if exist "%VERSION_FILE%" (
 )
 if "%LOCAL_VER%"=="%VERSION%" (
     echo  Ya actualizado: %VERSION%
+    echo [%date% %time%] PASO3 Ya actualizado >> "%LOG_FILE%"
     goto checkin_and_loop
 )
 echo  Local: %LOCAL_VER% ^| Servidor: %VERSION%
+echo [%date% %time%] PASO3 Local: %LOCAL_VER% Servidor: %VERSION% >> "%LOG_FILE%"
 
 REM ===== PASO 4: DESCARGAR =====
 echo [4/6] Descargando...
@@ -90,92 +98,102 @@ title DBF Sync - %CONERA% - descargando...
 set ZIP_FILE=%TEMP%\dbf_sync_%VERSION%.zip
 set DOWNLOADS_DIR=%USERPROFILE%\Downloads
 del "%ZIP_FILE%" 2>nul
+echo [%date% %time%] PASO4 INICIO >> "%LOG_FILE%"
 
-REM ===== METODO 1: CHROME (mas rapido en coneras con TLS roto) =====
+REM ===== METODO 1: CHROME =====
 set CHROME_PATH=
 for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH=%%~p
 if "%CHROME_PATH%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH=chrome.exe
+echo [%date% %time%] CHROME PATH: %CHROME_PATH% >> "%LOG_FILE%"
 
 if not "%CHROME_PATH%"=="" (
-    echo   - Chrome (perfil temp)... 
-    title DBF Sync - %CONERA% - Chrome descargando...
+    echo   - Chrome...
+    title DBF Sync - %CONERA% - Chrome...
+
     set CHROME_TEMP=%TEMP%\chrome_dl_%VERSION%
-    set CHROME_DL_DIR=%CHROME_TEMP%\downloads
-    set CHROME_UD_DIR=%CHROME_TEMP%\user-data
-    if exist "%CHROME_TEMP%" rmdir /s /q "%CHROME_TEMP%" 2>nul
-    md "%CHROME_DL_DIR%" 2>nul
-    md "%CHROME_UD_DIR%\Default" 2>nul
+    set CHROME_DL_DIR=!CHROME_TEMP!\downloads
+    set CHROME_UD_DIR=!CHROME_TEMP!\user-data
+    if exist "!CHROME_TEMP!" rmdir /s /q "!CHROME_TEMP!" 2>nul
+    md "!CHROME_DL_DIR!" 2>nul
+    md "!CHROME_UD_DIR!\Default" 2>nul
 
-    powershell -ExecutionPolicy Bypass -Command ^
-"$d='%CHROME_DL_DIR:\=\\';" ^
-"$j='{\"download\":{\"default_directory\":\"'+$d+'\",\"prompt_for_download\":false,\"directory_upgrade\":true},\"safebrowsing\":{\"enabled\":false},\"browser\":{\"check_default_browser\":false}}';" ^
-"[System.IO.File]::WriteAllText('%CHROME_UD_DIR%\Default\Preferences',$j)" >nul 2>nul
+    > "!CHROME_UD_DIR!\Default\Preferences" echo {"download":{"default_directory":"!CHROME_DL_DIR:\=\\!","prompt_for_download":false,"directory_upgrade":true},"safebrowsing":{"enabled":false},"browser":{"check_default_browser":false}}
 
-    taskkill /f /im chrome.exe >nul 2>nul >nul 2>nul
+    taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start /min "" "%CHROME_PATH%" --user-data-dir="%CHROME_UD_DIR%" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    start /min "" "%CHROME_PATH%" --user-data-dir="!CHROME_UD_DIR!" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%" >>"%LOG_FILE%" 2>&1
     timeout /t 20 /nobreak >nul
-    taskkill /f /im chrome.exe >nul 2>nul >nul 2>nul
+    taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
 
-    for /r "%CHROME_DL_DIR%" %%f in (*.zip) do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+    for /f "delims=" %%f in ('dir /a-d /s /b "!CHROME_DL_DIR!\*.zip" 2^>nul') do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
     if not exist "%ZIP_FILE%" (
-        for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
+        for /f "delims=" %%f in ('dir /a-d /s /b "%DOWNLOADS_DIR%\*%VERSION%*.zip" 2^>nul') do (
             copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
             del "%%f" 2>nul
         )
     )
-    if exist "%ZIP_FILE%" goto extraer
+    if exist "%ZIP_FILE%" (
+        echo [%date% %time%] CHROME OK: encontrado >> "%LOG_FILE%"
+        goto extraer
+    )
+    echo [%date% %time%] CHROME: no encontro ZIP >> "%LOG_FILE%"
 )
 
-REM ===== METODO 2: FIREFOX (si Chrome no esta o fallo) =====
+REM ===== METODO 2: FIREFOX =====
 set FIREFOX_PATH=
 for %%p in ("%PROGRAMFILES%\Mozilla Firefox\firefox.exe" "%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe") do if exist "%%~p" set FIREFOX_PATH=%%~p
 if "%FIREFOX_PATH%"=="" where firefox.exe >nul 2>nul && set FIREFOX_PATH=firefox.exe
+echo [%date% %time%] FIREFOX PATH: %FIREFOX_PATH% >> "%LOG_FILE%"
 
 if not "%FIREFOX_PATH%"=="" (
     echo   - Firefox...
-    title DBF Sync - %CONERA% - Firefox descargando...
-    taskkill /f /im firefox.exe >nul 2>nul >nul 2>nul
+    title DBF Sync - %CONERA% - Firefox...
+    taskkill /f /im firefox.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start /min "" "%FIREFOX_PATH%" --new-window "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    start /min "" "%FIREFOX_PATH%" --new-window "%SERVER_URL%/api/download/%VERSION%" >>"%LOG_FILE%" 2>&1
     timeout /t 20 /nobreak >nul
-    taskkill /f /im firefox.exe >nul 2>nul >nul 2>nul
+    taskkill /f /im firefox.exe >nul 2>nul
     for /r "%DOWNLOADS_DIR%" %%f in (*%VERSION%*.zip) do (
         copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
         del "%%f" 2>nul
     )
-    if exist "%ZIP_FILE%" goto extraer
+    if exist "%ZIP_FILE%" (
+        echo [%date% %time%] FIREFOX OK >> "%LOG_FILE%"
+        goto extraer
+    )
+    echo [%date% %time%] FIREFOX: no encontro ZIP >> "%LOG_FILE%"
 )
 
 REM ===== METODO 3: bitsadmin (fallback) =====
 echo   - bitsadmin...
-bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
+echo [%date% %time%] bitsadmin intentando... >> "%LOG_FILE%"
+bitsadmin /transfer dbfsync /download /priority high "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>>"%LOG_FILE%"
+if exist "%ZIP_FILE%" (
+    echo [%date% %time%] bitsadmin OK >> "%LOG_FILE%"
+    goto extraer
+)
 
 REM ===== METODO 4: certutil (fallback) =====
 echo   - certutil...
-certutil -urlcache -split -f "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
-
-REM ===== METODO 5: PowerShell con timeout =====
-echo   - PowerShell (15s timeout)...
-start /b /min cmd /c "powershell -ExecutionPolicy Bypass -Command """try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}""" >nul 2>nul"
-timeout /t 15 /nobreak >nul
-taskkill /f /im powershell.exe >nul 2>nul
-if exist "%ZIP_FILE%" goto extraer
+echo [%date% %time%] certutil intentando... >> "%LOG_FILE%"
+certutil -urlcache -split -f "%SERVER_URL%/api/download/%VERSION%" "%ZIP_FILE%" >nul 2>>"%LOG_FILE%"
+if exist "%ZIP_FILE%" (
+    echo [%date% %time%] certutil OK >> "%LOG_FILE%"
+    goto extraer
+)
 
 REM ===== NADA FUNCIONO =====
+echo [%date% %time%] ERROR: todos los metodos fallaron >> "%LOG_FILE%"
 title DBF Sync - %CONERA% - ERROR descarga
 echo.
-echo  ERROR: No se pudo descargar.
+echo  ERROR: No se pudo descargar automaticamente.
+echo  Revise el log: %LOG_FILE%
 echo.
 echo  Abra Chrome y navegue a:
 echo  %SERVER_URL%/api/download/%VERSION%
 echo.
-echo  Guarde el archivo en:
-echo  %ZIP_FILE%
-echo.
+echo  Guarde el archivo en %ZIP_FILE%, luego presione Enter...
 pause
 if not exist "%ZIP_FILE%" (
     echo  Continuando sin actualizar...
@@ -184,16 +202,19 @@ if not exist "%ZIP_FILE%" (
 
 :extraer
 echo  ZIP descargado OK
+echo [%date% %time%] PASO4 DESCARGA OK >> "%LOG_FILE%"
 
 REM ===== PASO 5: EXTRAER =====
 echo [5/6] Extrayendo archivos...
+echo [%date% %time%] PASO5 EXTRACCION >> "%LOG_FILE%"
 set EXTRACT_DIR=%TEMP%\dbf_sync_extract
 if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" 2>nul
 mkdir "%EXTRACT_DIR%" 2>nul
 
+REM Intentar extraer con Shell.Application COM
 powershell -ExecutionPolicy Bypass -Command ^
 "try { $s = New-Object -ComObject Shell.Application; " ^
-"$z = $s.NameSpace('%ZIP_FILE%'); $d = $s.NameSpace('%EXTRACT_DIR%'); $d.CopyHere($z.Items(), 20) } catch {}" >nul 2>nul
+"$z = $s.NameSpace('%ZIP_FILE%'); $d = $s.NameSpace('%EXTRACT_DIR%'); $d.CopyHere($z.Items(), 20) } catch { exit 1 }" >>"%LOG_FILE%" 2>&1
 
 echo  Copiando a DATA y NEWDATA...
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%" 2>nul
@@ -204,33 +225,30 @@ for /r "%EXTRACT_DIR%" %%f in (*.dbf) do (
     copy /y "%%f" "%NEWDATA_DIR%\" >nul 2>nul
 )
 
-echo %VERSION% > "%VERSION_FILE%"
+echo %VERSION% > "%VERSION_FILE%" 2>>"%LOG_FILE%"
+echo [%date% %time%] PASO5 OK >> "%LOG_FILE%"
 echo  OK
 
 REM ===== CHECK-IN =====
 :checkin_and_loop
 echo [6/6] Enviando check-in...
+echo [%date% %time%] PASO6 CHECKIN >> "%LOG_FILE%"
 
-REM Intentar VBScript (multi-metodo COM)
-cscript //nologo "%~dp0sync-download.vbs" register >nul 2>nul
-cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >nul 2>nul
+REM VBScript checkin (usa Chrome fallback via FetchUrl, no se cuelga)
+cscript //nologo "%~dp0sync-download.vbs" register >>"%LOG_FILE%" 2>&1
+cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >>"%LOG_FILE%" 2>&1
 
-REM Fallback PowerShell (.NET con TLS 1.2)
-powershell -ExecutionPolicy Bypass -Command ^
-"try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
-"try { $w = New-Object Net.WebClient; $w.DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') } catch {}; " ^
-"try { $w.DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') } catch {}" >nul 2>nul
-
-REM Buscar Chrome para check-in
+REM Chrome headless checkin (rapido, TLS propio)
 set CHROME_PATH2=
 for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH2=%%~p
 if "%CHROME_PATH2%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH2=chrome.exe
 if not "%CHROME_PATH2%"=="" (
-    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%" >nul 2>nul
-    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >nul 2>nul
+    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%" >>"%LOG_FILE%" 2>&1
+    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >>"%LOG_FILE%" 2>&1
 )
 timeout /t 3 /nobreak >nul
 echo  OK
+echo [%date% %time%] PASO6 OK >> "%LOG_FILE%"
 
 del "%ZIP_FILE%" "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
@@ -247,21 +265,23 @@ echo.
 echo  Creando tarea programada para check-in cada 5 minutos...
 echo  (La ventana se cerrara, la tarea corre en segundo plano)
 echo.
+echo [%date% %time%] Creando schtask... >> "%LOG_FILE%"
 
 set TASK_NAME=DBF_Sync_%CONERA%
 set TASK_SCRIPT="%~dp0sync-download.vbs"
 
 REM Eliminar tarea anterior si existe
-schtasks /delete /tn "%TASK_NAME%" /f >nul 2>nul
+schtasks /delete /tn "%TASK_NAME%" /f >nul 2>>"%LOG_FILE%"
 
 REM Crear tarea cada 5 minutos
-schtasks /create /tn "%TASK_NAME%" /tr "cscript //nologo \"%TASK_SCRIPT%\" checkin \"%VERSION%\"" /sc minute /mo 5 /f >nul 2>nul
+schtasks /create /tn "%TASK_NAME%" /tr "cscript //nologo \"%TASK_SCRIPT%\" checkin \"%VERSION%\"" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
 
 if %errorlevel% equ 0 (
     echo  Tarea creada: %TASK_NAME% (cada 5 min)
+    echo [%date% %time%] schtask OK >> "%LOG_FILE%"
 ) else (
     echo  [!] No se pudo crear tarea programada
-    echo  El check-in automatico no estara activo
+    echo [%date% %time%] schtask ERROR >> "%LOG_FILE%"
     pause
 )
 
@@ -271,6 +291,8 @@ echo   Actualizado: %VERSION%
 echo   Check-in automatico cada 5 minutos
 echo   Tarea: %TASK_NAME%
 echo =============================================
+echo.
+echo  Log: %LOG_FILE%
 echo.
 echo  Presione Enter para cerrar...
 pause >nul
