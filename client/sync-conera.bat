@@ -108,15 +108,40 @@ powershell -ExecutionPolicy Bypass -Command ^
 "try { $w = New-Object Net.WebClient; $w.DownloadFile('%SERVER_URL%/api/download/%VERSION%', '%ZIP_FILE%') } catch {}" >nul 2>nul
 if exist "%ZIP_FILE%" goto download_ok
 
-REM Method 4: VBScript (IE COM)
-echo  Intentando Internet Explorer...
+REM Method 4: Chrome headless
+echo  Intentando Chrome...
+for %%X in (chrome.exe) do (set FOUND=%%~$PATH:X)
+if not "!FOUND!"=="" (
+    start /wait "" chrome --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    timeout /t 5 /nobreak >nul
+    for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
+        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        goto download_ok
+    )
+)
+
+REM Method 5: Firefox headless
+echo  Intentando Firefox...
+for %%X in (firefox.exe) do (set FOUND=%%~$PATH:X)
+if not "!FOUND!"=="" (
+    start /wait "" firefox --headless "%SERVER_URL%/api/download/%VERSION%" >nul 2>nul
+    timeout /t 5 /nobreak >nul
+    for /r "%USERPROFILE%\Downloads" %%f in (*%VERSION%*.zip) do (
+        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+        goto download_ok
+    )
+)
+
+REM Method 6: VBScript helper (multi-fallback)
+echo  Intentando VBScript...
 cscript //nologo "%~dp0sync-download.vbs" download "%VERSION%" >nul 2>nul
 if exist "%ZIP_FILE%" goto download_ok
 
 echo  ERROR: No se pudo descargar el archivo
 echo.
-echo  Intente descargar manualmente desde Chrome:
+echo  Abra Chrome manualmente y pegue esta URL:
 echo  %SERVER_URL%/api/download/%VERSION%
+echo  Luego copie el ZIP descargado a: %ZIP_FILE%
 pause
 exit /b 1
 

@@ -7,22 +7,21 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 Set args = WScript.Arguments
 
-' Read config from sync-config.txt
 Call LoadConfig()
 
 If args.Count > 0 Then
     Select Case LCase(args(0))
         Case "version"
             Dim vj
-            vj = GetVersionJson()
+            vj = FetchUrl(strServerUrl & "/api/version")
             If vj <> "" Then
-                WScript.Echo HttpGetJsonValue(vj, "version")
+                WScript.Echo ExtractJsonValue(vj, "version")
             End If
         Case "register"
-            Call RegisterConera()
+            FetchUrl strServerUrl & "/api/conera/register?name=" & strConeraName
         Case "checkin"
             If args.Count >= 2 Then
-                Call Checkin(args(1))
+                FetchUrl strServerUrl & "/api/conera/checkin?name=" & strConeraName & "&version=" & args(1)
             End If
         Case "download"
             If args.Count >= 2 Then
@@ -32,8 +31,7 @@ If args.Count > 0 Then
 End If
 
 Sub LoadConfig()
-    Dim strConfigFile, ts, line, eqPos, key, value, loaded
-    loaded = False
+    Dim strConfigFile, ts, line, eqPos, key, value
     strConfigFile = fso.BuildPath(fso.GetParentFolderName(WScript.ScriptFullName), "sync-config.txt")
     If fso.FileExists(strConfigFile) Then
         On Error Resume Next
@@ -46,7 +44,7 @@ Sub LoadConfig()
                     key = Trim(Left(line, eqPos - 1))
                     value = Trim(Mid(line, eqPos + 1))
                     Select Case LCase(key)
-                        Case "server_url": strServerUrl = value: loaded = True
+                        Case "server_url": strServerUrl = value
                         Case "conera_name": strConeraName = value
                         Case "data_dir": strDataDir = value
                         Case "newdata_dir": strNewDataDir = value
@@ -65,13 +63,132 @@ Sub LoadConfig()
     If strVersionFile = "" Then strVersionFile = "C:\Bootdrv\AlohaQs\version.txt"
 End Sub
 
-' Uses InternetExplorer.Application which has its own TLS stack (Trident engine)
-Function IeFetch(url)
+' ============================================================
+' FETCH URL - Intenta multiples metodos hasta que uno funcione
+' ============================================================
+Function FetchUrl(url)
+    Dim result
+    result = TryComMethods(url)
+    If result <> "" Then
+        FetchUrl = result
+        Exit Function
+    End If
+    result = TryPowerShell(url)
+    If result <> "" Then
+        FetchUrl = result
+        Exit Function
+    End If
+    result = TryIExplorer(url)
+    If result <> "" Then
+        FetchUrl = result
+        Exit Function
+    End If
+    result = TryWebBrowser(url)
+    If result <> "" Then
+        FetchUrl = result
+        Exit Function
+    End If
+    result = TryChrome(url)
+    If result <> "" Then
+        FetchUrl = result
+        Exit Function
+    End If
+    result = TryFirefox(url)
+    If result <> "" Then
+        FetchUrl = result
+        Exit Function
+    End If
+    For i = 1 To 3
+        WScript.Sleep 1000
+        result = TryChrome(url)
+        If result <> "" Then
+            FetchUrl = result
+            Exit Function
+        End If
+    Next
+    FetchUrl = ""
+End Function
+
+' ============================================================
+' METODO 1: 13 COM objects en secuencia (WinHTTP/ServerXMLHTTP/XMLHTTP)
+' ============================================================
+Function TryComMethods(url)
+    Dim methods, i, methodName, obj
+    methods = Array( _
+        "WinHttp.WinHttpRequest.5.1", _
+        "MSXML2.ServerXMLHTTP.6.0", _
+        "MSXML2.ServerXMLHTTP.3.0", _
+        "MSXML2.ServerXMLHTTP", _
+        "MSXML2.XMLHTTP.6.0", _
+        "MSXML2.XMLHTTP.3.0", _
+        "MSXML2.XMLHTTP", _
+        "Microsoft.XMLHTTP", _
+        "MSXML2.ServerXMLHTTP.5.0", _
+        "MSXML2.ServerXMLHTTP.4.0", _
+        "MSXML2.XMLHTTP.5.0", _
+        "MSXML2.XMLHTTP.4.0", _
+        "WinHttp.WinHttpRequest" _
+    )
+    On Error Resume Next
+    For i = 0 To UBound(methods)
+        methodName = methods(i)
+        Set obj = Nothing
+        Set obj = CreateObject(methodName)
+        If Err.Number = 0 Then
+            If InStr(methodName, "WinHttp") > 0 Then obj.Option(9) = 4096
+            obj.Open "GET", url, False
+            obj.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+            obj.Send
+            If Err.Number = 0 And obj.Status = 200 Then
+                TryComMethods = obj.ResponseText
+                Set obj = Nothing
+                On Error Goto 0
+                Exit Function
+            End If
+        End If
+        Err.Clear
+    Next
+    On Error Goto 0
+    TryComMethods = ""
+End Function
+
+' ============================================================
+' METODO 2: PowerShell (NET WebClient con TLS 1.2)
+' ============================================================
+Function TryPowerShell(url)
+    Dim dataFile, resultFile, psContent, result
+    dataFile = fso.GetSpecialFolder(2) & "\dbf_ps_data.txt"
+    resultFile = fso.GetSpecialFolder(2) & "\dbf_ps_result.txt"
+    psContent = "$url = '" & url & "'" & vbCrLf & _
+                "$resultFile = '" & resultFile & "'" & vbCrLf & _
+                "Try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } Catch { }" & vbCrLf & _
+                "Try { $r = (New-Object Net.WebClient).DownloadString($url); $r | Out-File $resultFile -Encoding UTF8 } Catch { }"
+    Dim psFile
+    psFile = fso.GetSpecialFolder(2) & "\dbf_ps.ps1"
+    WriteFile psFile, psContent
+    On Error Resume Next
+    shell.Run "powershell -ExecutionPolicy Bypass -File """ & psFile & """", 0, True
+    On Error Goto 0
+    If fso.FileExists(resultFile) Then
+        Dim inFile
+        Set inFile = fso.OpenTextFile(resultFile, 1)
+        result = inFile.ReadAll()
+        inFile.Close
+        fso.DeleteFile resultFile, True
+    End If
+    fso.DeleteFile psFile, True
+    TryPowerShell = result
+End Function
+
+' ============================================================
+' METODO 3: InternetExplorer.Application
+' ============================================================
+Function TryIExplorer(url)
     Dim ie, resp
     On Error Resume Next
     Set ie = CreateObject("InternetExplorer.Application")
     If Err.Number <> 0 Then
-        IeFetch = ""
+        TryIExplorer = ""
         Exit Function
     End If
     ie.Visible = False
@@ -81,101 +198,281 @@ Function IeFetch(url)
         WScript.Sleep 100
     Loop
     WScript.Sleep 200
-    If Err.Number = 0 And Not (ie.Document Is Nothing) Then
+    If Not (ie.Document Is Nothing) Then
         On Error Resume Next
         resp = ie.Document.body.innerText
         If Err.Number <> 0 Then resp = ""
         On Error Goto 0
-    Else
-        resp = ""
     End If
     ie.Quit
     Set ie = Nothing
     On Error Goto 0
-    IeFetch = resp
+    TryIExplorer = resp
 End Function
 
-Function GetVersionJson()
-    Dim url
-    url = strServerUrl & "/api/version"
-    GetVersionJson = IeFetch(url)
+' ============================================================
+' METODO 4: Shell.Explorer.2 (WebBrowser control, disponible incluso sin IE)
+' ============================================================
+Function TryWebBrowser(url)
+    Dim wb, resp
+    On Error Resume Next
+    Set wb = CreateObject("Shell.Explorer.2")
+    If Err.Number <> 0 Then
+        TryWebBrowser = ""
+        Exit Function
+    End If
+    wb.Navigate url
+    Dim waitCount
+    waitCount = 0
+    Do While wb.Busy And waitCount < 50
+        WScript.Sleep 200
+        waitCount = waitCount + 1
+    Loop
+    WScript.Sleep 500
+    If Not (wb.Document Is Nothing) Then
+        On Error Resume Next
+        resp = wb.Document.body.innerText
+        If Err.Number <> 0 Then resp = ""
+        On Error Goto 0
+    End If
+    Set wb = Nothing
+    On Error Goto 0
+    TryWebBrowser = resp
 End Function
 
-Function HttpGetJsonValue(jsonText, key)
+' ============================================================
+' METODO 5: Google Chrome headless
+' ============================================================
+Function FindChrome()
+    Dim paths, i
+    paths = Array( _
+        shell.ExpandEnvironmentStrings("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), _
+        shell.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"), _
+        shell.ExpandEnvironmentStrings("%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"), _
+        "C:\Program Files\Google\Chrome\Application\chrome.exe", _
+        "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" _
+    )
+    On Error Resume Next
+    For i = 0 To UBound(paths)
+        If fso.FileExists(paths(i)) Then
+            FindChrome = paths(i)
+            Exit Function
+        End If
+    Next
+    ' Try registry
+    Dim regPath
+    regPath = shell.RegRead("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe\")
+    If Err.Number = 0 And regPath <> "" Then
+        FindChrome = regPath
+        Exit Function
+    End If
+    Err.Clear
+    On Error Goto 0
+    FindChrome = ""
+End Function
+
+Function TryChrome(url)
+    Dim chromePath, tmpFile, cmd, result
+    chromePath = FindChrome()
+    If chromePath = "" Then
+        TryChrome = ""
+        Exit Function
+    End If
+    tmpFile = fso.GetSpecialFolder(2) & "\dbf_chrome_output.html"
+    cmd = """" & chromePath & """ --headless --disable-gpu --virtual-time-budget=10000 --dump-dom """ & url & """ > """ & tmpFile & """ 2>nul"
+    On Error Resume Next
+    shell.Run cmd, 0, True
+    On Error Goto 0
+    If fso.FileExists(tmpFile) Then
+        Dim inFile
+        Set inFile = fso.OpenTextFile(tmpFile, 1)
+        result = inFile.ReadAll()
+        inFile.Close
+        fso.DeleteFile tmpFile, True
+        ' Chrome --dump-dom wraps in HTML, extract the body text
+        result = ExtractBodyText(result)
+    End If
+    TryChrome = result
+End Function
+
+' ============================================================
+' METODO 6: Mozilla Firefox headless
+' ============================================================
+Function FindFirefox()
+    Dim paths, i
+    paths = Array( _
+        shell.ExpandEnvironmentStrings("%PROGRAMFILES%\Mozilla Firefox\firefox.exe"), _
+        shell.ExpandEnvironmentStrings("%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe"), _
+        "C:\Program Files\Mozilla Firefox\firefox.exe", _
+        "C:\Program Files (x86)\Mozilla Firefox\firefox.exe" _
+    )
+    On Error Resume Next
+    For i = 0 To UBound(paths)
+        If fso.FileExists(paths(i)) Then
+            FindFirefox = paths(i)
+            Exit Function
+        End If
+    Next
+    Dim regPath
+    regPath = shell.RegRead("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe\")
+    If Err.Number = 0 And regPath <> "" Then
+        FindFirefox = regPath
+        Exit Function
+    End If
+    Err.Clear
+    On Error Goto 0
+    FindFirefox = ""
+End Function
+
+Function TryFirefox(url)
+    Dim fxPath, tmpFile, cmd, result
+    fxPath = FindFirefox()
+    If fxPath = "" Then
+        TryFirefox = ""
+        Exit Function
+    End If
+    tmpFile = fso.GetSpecialFolder(2) & "\dbf_fx_output.html"
+    cmd = """" & fxPath & """ --headless --window-size 1,1 """ & url & """ > """ & tmpFile & """ 2>nul"
+    On Error Resume Next
+    shell.Run cmd, 0, True
+    On Error Goto 0
+    If fso.FileExists(tmpFile) Then
+        Dim inFile
+        Set inFile = fso.OpenTextFile(tmpFile, 1)
+        result = inFile.ReadAll()
+        inFile.Close
+        fso.DeleteFile tmpFile, True
+        result = ExtractBodyText(result)
+    End If
+    TryFirefox = result
+End Function
+
+' ============================================================
+' HELPERS
+' ============================================================
+Sub WriteFile(path, content)
+    Dim f
+    Set f = fso.CreateTextFile(path, True)
+    f.Write content
+    f.Close
+End Sub
+
+Function ExtractJsonValue(jsonText, key)
     Dim re, matches
     Set re = New RegExp
     re.Pattern = """" & key & """\s*:\s*""([^""]+)"""
     re.IgnoreCase = True
     Set matches = re.Execute(jsonText)
     If matches.Count > 0 Then
-        HttpGetJsonValue = matches(0).SubMatches(0)
+        ExtractJsonValue = matches(0).SubMatches(0)
     Else
-        HttpGetJsonValue = ""
+        ExtractJsonValue = ""
     End If
 End Function
 
-Sub RegisterConera()
-    Dim url
-    url = strServerUrl & "/api/conera/register?name=" & strConeraName
-    IeFetch url
-End Sub
+Function ExtractBodyText(html)
+    Dim re, text
+    text = html
+    ' Remove HTML tags
+    Set re = New RegExp
+    re.Global = True
+    re.Pattern = "<[^>]+>"
+    text = re.Replace(text, "")
+    ' Remove extra whitespace
+    re.Pattern = "\s+"
+    text = re.Replace(text, " ")
+    ' Find JSON-like content (starts with {)
+    Dim start, endPos
+    start = InStr(text, "{")
+    If start > 0 Then
+        endPos = InStrRev(text, "}")
+        If endPos > start Then
+            ExtractBodyText = Mid(text, start, endPos - start + 1)
+            Exit Function
+        End If
+    End If
+    ExtractBodyText = Trim(text)
+End Function
 
-Sub Checkin(version)
-    Dim url
-    url = strServerUrl & "/api/conera/checkin?name=" & strConeraName & "&version=" & version
-    IeFetch url
-End Sub
-
+' ============================================================
+' DOWNLOAD ZIP - multiple methods
+' ============================================================
 Function DownloadZip(version)
-    Dim url, tmpZip, app, zipFolder, destFolder, f
+    Dim url, tmpZip
     url = strServerUrl & "/api/download/" & version
     tmpZip = fso.GetSpecialFolder(2) & "\dbf_sync_" & version & ".zip"
     
-    ' Download via bitsadmin (called from batch) or IE
-    ' IE can navigate to trigger download
-    Dim ie
+    ' Try bitsadmin via shell
     On Error Resume Next
-    Set ie = CreateObject("InternetExplorer.Application")
-    If Err.Number <> 0 Then
-        DownloadZip = False
+    shell.Run "bitsadmin /transfer dbfsync /download /priority high """ & url & """ """ & tmpZip & """", 0, True
+    If fso.FileExists(tmpZip) And fso.GetFile(tmpZip).Size > 0 Then
+        DownloadZip = ExtractAndInstall(tmpZip, version)
         Exit Function
     End If
-    ie.Visible = False
-    ie.Silent = True
-    ie.Navigate url
-    Do While ie.Busy
-        WScript.Sleep 100
-    Loop
-    WScript.Sleep 2000
-    ie.Quit
-    Set ie = Nothing
-    On Error Goto 0
     
-    ' Check if downloaded to Downloads folder
-    ' Fallback: assume the batch handled the download
-    If fso.FileExists(tmpZip) Then
-        ' Extract
-        Set app = CreateObject("Shell.Application")
-        On Error Resume Next
-        Set zipFolder = app.NameSpace(tmpZip)
-        If Not (zipFolder Is Nothing) Then
-            If Not fso.FolderExists(strDataDir) Then fso.CreateFolder strDataDir
-            If Not fso.FolderExists(strNewDataDir) Then fso.CreateFolder strNewDataDir
-            Set destFolder = app.NameSpace(strDataDir)
-            destFolder.CopyHere zipFolder.Items, 20
-            Set destFolder = app.NameSpace(strNewDataDir)
-            destFolder.CopyHere zipFolder.Items, 20
-        End If
-        On Error Goto 0
-        
-        ' Save version
-        Dim vf
-        Set vf = fso.CreateTextFile(strVersionFile, True)
-        vf.WriteLine version
-        vf.Close
-        
-        DownloadZip = True
-    Else
-        DownloadZip = False
+    ' Try certutil
+    shell.Run "certutil -urlcache -split -f """ & url & """ """ & tmpZip & """", 0, True
+    If fso.FileExists(tmpZip) And fso.GetFile(tmpZip).Size > 0 Then
+        DownloadZip = ExtractAndInstall(tmpZip, version)
+        Exit Function
     End If
+    
+    ' Try PowerShell
+    Dim psScript, psFile
+    psScript = "Try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } Catch { }" & vbCrLf & _
+               "Try { (New-Object Net.WebClient).DownloadFile('" & url & "', '" & tmpZip & "') } Catch { }"
+    psFile = fso.GetSpecialFolder(2) & "\dbf_dl.ps1"
+    WriteFile psFile, psScript
+    shell.Run "powershell -ExecutionPolicy Bypass -File """ & psFile & """", 0, True
+    fso.DeleteFile psFile, True
+    On Error Goto 0
+    If fso.FileExists(tmpZip) And fso.GetFile(tmpZip).Size > 0 Then
+        DownloadZip = ExtractAndInstall(tmpZip, version)
+        Exit Function
+    End If
+    
+    ' Try browser navigation (triggers download to user's Downloads folder)
+    Dim browserPath
+    browserPath = FindChrome()
+    If browserPath <> "" Then
+        shell.Run """" & browserPath & """ """ & url & """", 1, False
+        WScript.Sleep 5000
+        ' Check common downloads folder
+        Dim dlFolder
+        dlFolder = shell.ExpandEnvironmentStrings("%USERPROFILE%\Downloads")
+        Dim dlFile
+        dlFile = dlFolder & "\" & version & ".zip"
+        If fso.FileExists(dlFile) Then
+            fso.CopyFile dlFile, tmpZip, True
+            fso.DeleteFile dlFile, True
+            DownloadZip = ExtractAndInstall(tmpZip, version)
+            Exit Function
+        End If
+    End If
+    
+    DownloadZip = False
+End Function
+
+Function ExtractAndInstall(zipPath, version)
+    Dim app, zipFolder, destFolder
+    Set app = CreateObject("Shell.Application")
+    On Error Resume Next
+    Set zipFolder = app.NameSpace(zipPath)
+    If zipFolder Is Nothing Then
+        ExtractAndInstall = False
+        Exit Function
+    End If
+    If Not fso.FolderExists(strDataDir) Then fso.CreateFolder strDataDir
+    If Not fso.FolderExists(strNewDataDir) Then fso.CreateFolder strNewDataDir
+    Set destFolder = app.NameSpace(strDataDir)
+    destFolder.CopyHere zipFolder.Items, 20
+    Set destFolder = app.NameSpace(strNewDataDir)
+    destFolder.CopyHere zipFolder.Items, 20
+    On Error Goto 0
+    Dim vf
+    Set vf = fso.CreateTextFile(strVersionFile, True)
+    vf.WriteLine version
+    vf.Close
+    fso.DeleteFile zipPath, True
+    ExtractAndInstall = True
 End Function
