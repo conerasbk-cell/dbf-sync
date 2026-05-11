@@ -20,27 +20,42 @@ if exist "%~dp0sync-config.txt" (
     )
 )
 
-set CHROME=
-for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME=%%~p
-if "%CHROME%"=="" where chrome.exe >nul 2>nul && set CHROME=chrome.exe
-if "%CHROME%"=="" (
-    echo ERROR: No se encuentra Chrome
-    echo Instale Google Chrome o use sync-conera.bat
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f >nul 2>nul
+
+REM ===== DETECTAR NAVEGADOR =====
+set BROWSER=
+set BROWSER_NAME=
+set BROWSER_CHROME=0
+set BROWSER_FIREFOX=0
+
+for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set BROWSER=%%~p & set BROWSER_NAME=Chrome & set BROWSER_CHROME=1
+if "%BROWSER%"=="" where chrome.exe >nul 2>nul && set BROWSER=chrome.exe & set BROWSER_NAME=Chrome & set BROWSER_CHROME=1
+
+if "%BROWSER%"=="" (
+    for %%p in ("%PROGRAMFILES%\Mozilla Firefox\firefox.exe" "%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe") do if exist "%%~p" set BROWSER=%%~p & set BROWSER_NAME=Firefox & set BROWSER_FIREFOX=1
+    if "!BROWSER!"=="" where firefox.exe >nul 2>nul && set BROWSER=firefox.exe & set BROWSER_NAME=Firefox & set BROWSER_FIREFOX=1
+)
+
+if "%BROWSER%"=="" (
+    echo ERROR: No se encuentra Chrome ni Firefox
     pause
     exit /b 1
 )
 
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f >nul 2>nul
-
 echo =============================================
 echo   DBF Sync Express - %CONERA%
+echo   Navegador: %BROWSER_NAME%
 echo =============================================
 echo.
 
 REM ===== 1. VERSION =====
 echo [1/3] Obteniendo version del servidor...
 
-start /b /wait "" "%CHROME%" --headless --disable-gpu --no-sandbox --virtual-time-budget=10000 --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
+if %BROWSER_CHROME% equ 1 (
+    start /b /wait "" "%BROWSER%" --headless --disable-gpu --no-sandbox --virtual-time-budget=10000 --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
+) else (
+    start /b /wait "" "%BROWSER%" --headless --window-size 1,1 "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
+)
 
 set VERSION=
 for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
@@ -68,35 +83,74 @@ set ZIP_FILE=%TEMP%\dbf_%VERSION%.zip
 set DOWNLOADS=%USERPROFILE%\Downloads
 del "%ZIP_FILE%" 2>nul
 
-set CHROME_TEMP=%TEMP%\chrome_dl_%VERSION%
-set CHROME_DL_DIR=!CHROME_TEMP!\downloads
-set CHROME_UD_DIR=!CHROME_TEMP!\user-data
-if exist "!CHROME_TEMP!" rmdir /s /q "!CHROME_TEMP!" 2>nul
-md "!CHROME_DL_DIR!" 2>nul
-md "!CHROME_UD_DIR!\Default" 2>nul
+if %BROWSER_CHROME% equ 1 (
+    REM === Chrome temp profile ===
+    set CHROME_TEMP=%TEMP%\chrome_dl_%VERSION%
+    set CHROME_DL_DIR=!CHROME_TEMP!\downloads
+    set CHROME_UD_DIR=!CHROME_TEMP!\user-data
+    if exist "!CHROME_TEMP!" rmdir /s /q "!CHROME_TEMP!" 2>nul
+    md "!CHROME_DL_DIR!" 2>nul
+    md "!CHROME_UD_DIR!\Default" 2>nul
 
-> "!CHROME_UD_DIR!\Default\Preferences" echo {"download":{"default_directory":"!CHROME_DL_DIR:\=\\!","prompt_for_download":false,"directory_upgrade":true},"safebrowsing":{"enabled":false},"browser":{"check_default_browser":false}}
+    > "!CHROME_UD_DIR!\Default\Preferences" echo {"download":{"default_directory":"!CHROME_DL_DIR:\=\\!","prompt_for_download":false,"directory_upgrade":true},"safebrowsing":{"enabled":false},"browser":{"check_default_browser":false}}
 
-echo   Chrome (perfil temporal, sin ventanas)...
-taskkill /f /im chrome.exe >nul 2>nul
-timeout /t 1 /nobreak >nul
-start /min "" "%CHROME%" --user-data-dir="!CHROME_UD_DIR!" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%"
-timeout /t 20 /nobreak >nul
-taskkill /f /im chrome.exe >nul 2>nul
-timeout /t 1 /nobreak >nul
+    echo   Chrome (perfil temporal, sin ventanas)...
+    taskkill /f /im chrome.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
+    start /min "" "%BROWSER%" --user-data-dir="!CHROME_UD_DIR!" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%"
+    timeout /t 20 /nobreak >nul
+    taskkill /f /im chrome.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
 
-for /f "delims=" %%f in ('dir /a-d /s /b "!CHROME_DL_DIR!\*.zip" 2^>nul') do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-if not exist "%ZIP_FILE%" (
-    for /f "delims=" %%f in ('dir /a-d /s /b "%DOWNLOADS%\*%VERSION%*.zip" 2^>nul') do (
-        copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
-        del "%%f" 2>nul
+    for /f "delims=" %%f in ('dir /a-d /s /b "!CHROME_DL_DIR!\*.zip" 2^>nul') do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+    if not exist "%ZIP_FILE%" (
+        for /f "delims=" %%f in ('dir /a-d /s /b "%DOWNLOADS%\*%VERSION%*.zip" 2^>nul') do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+            del "%%f" 2>nul
+        )
+    )
+) else (
+    REM === Firefox temp profile ===
+    set FX_TEMP=%TEMP%\fx_dl_%VERSION%
+    set FX_DL_DIR=!FX_TEMP!\downloads
+    set FX_PROFILE_DIR=!FX_TEMP!\profile
+    if exist "!FX_TEMP!" rmdir /s /q "!FX_TEMP!" 2>nul
+    md "!FX_DL_DIR!" 2>nul
+    md "!FX_PROFILE_DIR!" 2>nul
+
+    (
+    echo user_pref("browser.download.folderList", 2^);
+    echo user_pref("browser.download.dir", "!FX_DL_DIR:\=\\!"^);
+    echo user_pref("browser.download.useDownloadDir", true^);
+    echo user_pref("browser.helperApps.neverAsk.saveToDisk", "application/zip,application/x-zip,application/x-zip-compressed"^);
+    echo user_pref("browser.download.manager.showWhenStarting", false^);
+    echo user_pref("browser.download.manager.focusWhenStarting", false^);
+    echo user_pref("browser.download.manager.showAlertOnComplete", false^);
+    echo user_pref("browser.shell.checkDefaultBrowser", false^);
+    echo user_pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", true^);
+    ) > "!FX_PROFILE_DIR!\user.js"
+
+    echo   Firefox (perfil temporal, sin ventanas)...
+    taskkill /f /im firefox.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
+    start /min "" "%BROWSER%" --profile "!FX_PROFILE_DIR!" --no-remote --new-window "%SERVER_URL%/api/download/%VERSION%"
+    timeout /t 20 /nobreak >nul
+    taskkill /f /im firefox.exe >nul 2>nul
+    timeout /t 1 /nobreak >nul
+
+    for /f "delims=" %%f in ('dir /a-d /s /b "!FX_DL_DIR!\*.zip" 2^>nul') do copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+    if not exist "%ZIP_FILE%" (
+        for /f "delims=" %%f in ('dir /a-d /s /b "%DOWNLOADS%\*%VERSION%*.zip" 2^>nul') do (
+            copy /y "%%f" "%ZIP_FILE%" >nul 2>nul
+            del "%%f" 2>nul
+        )
     )
 )
 
 if not exist "%ZIP_FILE%" (
     echo.
     echo No se pudo descargar automaticamente.
-    echo Abra Chrome y descargue:
+    echo Abra %BROWSER_NAME% y descargue:
     echo   %SERVER_URL%/api/download/%VERSION%
     echo Guarde el archivo y presione Enter para continuar...
     pause
@@ -130,7 +184,8 @@ echo Actualizado a %VERSION%
 
 del "%ZIP_FILE%" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
-rmdir /s /q "!CHROME_TEMP!" 2>nul
+if defined CHROME_TEMP rmdir /s /q "!CHROME_TEMP!" 2>nul
+if defined FX_TEMP rmdir /s /q "!FX_TEMP!" 2>nul
 
 echo.
 
