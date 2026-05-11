@@ -55,17 +55,45 @@ echo [%date% %time%] INICIO: %CONERA% %BROWSER_NAME% >> "%LOG_FILE%"
 REM ===== 1. VERSION =====
 echo [1/3] Obteniendo version del servidor...
 
+del "%TEMP%\dbf_ver.txt" 2>nul
+
 if %BROWSER_CHROME% equ 1 (
-    start /b /wait "" "%BROWSER%" --headless --disable-gpu --no-sandbox --virtual-time-budget=10000 --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
+    start /min "" "%BROWSER%" --headless --disable-gpu --no-sandbox --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
 ) else (
-    start /b /wait "" "%BROWSER%" --headless --window-size 1,1 "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
+    start /min "" "%BROWSER%" --headless --window-size 1,1 "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
 )
+
+set WAIT_COUNT=0
+:WAIT_VER
+timeout /t 1 /nobreak >nul
+set /a WAIT_COUNT+=1
+set BROWSER_EXE=chrome.exe
+if %BROWSER_FIREFOX% equ 1 set BROWSER_EXE=firefox.exe
+tasklist /fi "imagename eq !BROWSER_EXE!" 2>nul | find /i "!BROWSER_EXE!" >nul
+if not errorlevel 1 if !WAIT_COUNT! lss 30 goto WAIT_VER
+taskkill /f /im !BROWSER_EXE! >nul 2>nul
 
 set VERSION=
 for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
+
+if "%VERSION%"=="" (
+    echo  Reintentando con bitsadmin...
+    bitsadmin /transfer dbfver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_ver2.txt" >nul 2>nul
+    for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver2.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
+)
+
+if "%VERSION%"=="" (
+    echo  Reintentando con certutil...
+    certutil -urlcache -split -f "%SERVER_URL%/api/version" "%TEMP%\dbf_ver3.txt" >nul 2>nul
+    for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver3.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
+)
+
 if "%VERSION%"=="" (
     echo ERROR: No se pudo conectar al servidor
     echo %SERVER_URL%/api/version
+    echo.
+    echo Revise que el servidor este desplegado en Render
+    echo y que la conera tenga conexion a internet.
     pause
     exit /b 1
 )
