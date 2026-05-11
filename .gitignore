@@ -5,6 +5,7 @@ dist/
 *.spec
 __pycache__/
 *.pyc
+test_*
 server/logs/
 server/db_uploads/*
 server/versions/*
