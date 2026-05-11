@@ -2,6 +2,8 @@
 setlocal enabledelayedexpansion
 
 title DBF Sync Express - %COMPUTERNAME%
+set LOG_FILE=%TEMP%\dbf_express_%COMPUTERNAME%.log
+echo [%date% %time%] INICIO > "%LOG_FILE%"
 
 set SERVER_URL=https://dbf-sync.onrender.com
 set CONERA=%COMPUTERNAME%
@@ -45,8 +47,10 @@ if "%BROWSER%"=="" (
 echo =============================================
 echo   DBF Sync Express - %CONERA%
 echo   Navegador: %BROWSER_NAME%
+echo   Log: %LOG_FILE%
 echo =============================================
 echo.
+echo [%date% %time%] INICIO: %CONERA% %BROWSER_NAME% >> "%LOG_FILE%"
 
 REM ===== 1. VERSION =====
 echo [1/3] Obteniendo version del servidor...
@@ -66,14 +70,17 @@ if "%VERSION%"=="" (
     exit /b 1
 )
 echo Version servidor: %VERSION%
+echo [%date% %time%] VERSION: %VERSION% >> "%LOG_FILE%"
 
 set LOCAL_VER=
 if exist "%VERSION_FILE%" set /p LOCAL_VER=<"%VERSION_FILE%"
 if "%LOCAL_VER%"=="%VERSION%" (
     echo Ya actualizado: %VERSION%
+    echo [%date% %time%] YA ACTUALIZADO: %VERSION% >> "%LOG_FILE%"
     goto run_iberqs
 )
 echo Version local: %LOCAL_VER%
+echo [%date% %time%] LOCAL: %LOCAL_VER% SERVIDOR: %VERSION% >> "%LOG_FILE%"
 echo.
 
 REM ===== 2. DOWNLOAD =====
@@ -148,6 +155,7 @@ if %BROWSER_CHROME% equ 1 (
 )
 
 if not exist "%ZIP_FILE%" (
+    echo [%date% %time%] ERROR: No se pudo descargar automaticamente >> "%LOG_FILE%"
     echo.
     echo No se pudo descargar automaticamente.
     echo Abra %BROWSER_NAME% y descargue:
@@ -160,10 +168,12 @@ if not exist "%ZIP_FILE%" (
     )
 )
 echo Zip descargado OK
+echo [%date% %time%] DESCARGA OK >> "%LOG_FILE%"
 echo.
 
 REM ===== 3. EXTRACT =====
 echo [3/3] Extrayendo archivos...
+echo [%date% %time%] EXTRACCION >> "%LOG_FILE%"
 
 set EXTRACT_DIR=%TEMP%\dbf_extract
 if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" 2>nul
@@ -181,6 +191,7 @@ for /r "%EXTRACT_DIR%" %%f in (*.dbf) do (
 
 echo %VERSION% > "%VERSION_FILE%"
 echo Actualizado a %VERSION%
+echo [%date% %time%] ACTUALIZADO: %VERSION% >> "%LOG_FILE%"
 
 del "%ZIP_FILE%" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
@@ -193,9 +204,11 @@ REM ===== RUN IBERQS =====
 :run_iberqs
 if exist "%IBERQS%" (
     echo Ejecutando Iberqs.exe...
+    echo [%date% %time%] IBERQS: %IBERQS% >> "%LOG_FILE%"
     start "" "%IBERQS%"
 ) else (
     echo Aviso: No se encuentra %IBERQS%
+    echo [%date% %time%] IBERQS NO ENCONTRADO: %IBERQS% >> "%LOG_FILE%"
 )
 
 echo.
