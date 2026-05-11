@@ -216,7 +216,11 @@ set EXTRACT_DIR=%TEMP%\dbf_extract
 if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" 2>nul
 mkdir "%EXTRACT_DIR%" 2>nul
 
-powershell -ExecutionPolicy Bypass -Command "try { $s = New-Object -ComObject Shell.Application; $z = $s.NameSpace('%ZIP_FILE%'); $d = $s.NameSpace('%EXTRACT_DIR%'); $d.CopyHere($z.Items(), 20) } catch { exit 1 }"
+REM Extraer ZIP (Expand-Archive PS5+, fallback Shell.Application)
+powershell -ExecutionPolicy Bypass -Command "try { if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) { Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force } else { Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('%ZIP_FILE%', '%EXTRACT_DIR%') } } catch { try { $s = New-Object -ComObject Shell.Application; $z = $s.NameSpace('%ZIP_FILE%'); $d = $s.NameSpace('%EXTRACT_DIR%'); $d.CopyHere($z.Items(), 20) } catch {} }"
+
+REM Quitar Zone.Identifier (archivos bloqueados por Windows)
+powershell -ExecutionPolicy Bypass -Command "Get-ChildItem '%EXTRACT_DIR%' -Recurse -Force | ForEach-Object { Remove-Item ($_.FullName + ':Zone.Identifier') -ErrorAction SilentlyContinue }" >>"%LOG_FILE%" 2>&1
 
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%" 2>nul
 if not exist "%NEWDATA_DIR%" mkdir "%NEWDATA_DIR%" 2>nul

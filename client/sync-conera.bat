@@ -121,7 +121,7 @@ if not "%CHROME_PATH%"=="" (
 
     taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start /min "" "%CHROME_PATH%" --user-data-dir="!CHROME_UD_DIR!" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%" >>"%LOG_FILE%" 2>&1
+    start /min "" "%CHROME_PATH%" --user-data-dir="!CHROME_UD_DIR!" --no-sandbox --disable-gpu --no-first-run --no-default-browser-check --disable-extensions --disable-features=DownloadBubble,InsecureDownloadWarnings --safebrowsing-disable-download-protection --new-window "%SERVER_URL%/api/download/%VERSION%"
     timeout /t 20 /nobreak >nul
     taskkill /f /im chrome.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
@@ -171,7 +171,7 @@ if not "%FIREFOX_PATH%"=="" (
 
     taskkill /f /im firefox.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
-    start /min "" "%FIREFOX_PATH%" --profile "!FX_PROFILE_DIR!" --no-remote --new-window "%SERVER_URL%/api/download/%VERSION%" >>"%LOG_FILE%" 2>&1
+    start /min "" "%FIREFOX_PATH%" --profile "!FX_PROFILE_DIR!" --no-remote --new-window "%SERVER_URL%/api/download/%VERSION%"
     timeout /t 20 /nobreak >nul
     taskkill /f /im firefox.exe >nul 2>nul
     timeout /t 1 /nobreak >nul
@@ -236,10 +236,11 @@ set EXTRACT_DIR=%TEMP%\dbf_sync_extract
 if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" 2>nul
 mkdir "%EXTRACT_DIR%" 2>nul
 
-REM Intentar extraer con Shell.Application COM
-powershell -ExecutionPolicy Bypass -Command ^
-"try { $s = New-Object -ComObject Shell.Application; " ^
-"$z = $s.NameSpace('%ZIP_FILE%'); $d = $s.NameSpace('%EXTRACT_DIR%'); $d.CopyHere($z.Items(), 20) } catch { exit 1 }" >>"%LOG_FILE%" 2>&1
+REM Extraer ZIP (Expand-Archive PS5+, fallback Shell.Application)
+powershell -ExecutionPolicy Bypass -Command "try { if (Get-Command Expand-Archive -ErrorAction SilentlyContinue) { Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force } else { Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('%ZIP_FILE%', '%EXTRACT_DIR%') } } catch { try { $s = New-Object -ComObject Shell.Application; $z = $s.NameSpace('%ZIP_FILE%'); $d = $s.NameSpace('%EXTRACT_DIR%'); $d.CopyHere($z.Items(), 20) } catch { exit 1 } }" >>"%LOG_FILE%" 2>&1
+
+REM Quitar Zone.Identifier (archivos bloqueados por Windows)
+powershell -ExecutionPolicy Bypass -Command "Get-ChildItem '%EXTRACT_DIR%' -Recurse -Force | ForEach-Object { Remove-Item ($_.FullName + ':Zone.Identifier') -ErrorAction SilentlyContinue }" >>"%LOG_FILE%" 2>&1
 
 echo  Copiando a DATA y NEWDATA...
 if not exist "%DATA_DIR%" mkdir "%DATA_DIR%" 2>nul
@@ -268,8 +269,8 @@ set CHROME_PATH2=
 for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH2=%%~p
 if "%CHROME_PATH2%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH2=chrome.exe
 if not "%CHROME_PATH2%"=="" (
-    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%" >>"%LOG_FILE%" 2>&1
-    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >>"%LOG_FILE%" 2>&1
+    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%"
+    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%"
 )
 timeout /t 3 /nobreak >nul
 echo  OK
