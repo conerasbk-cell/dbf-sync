@@ -1,2 +1,1 @@
 server_url=https://dbf-sync.onrender.com
-conera_name=NOMBRE-DE-LA-CONERA

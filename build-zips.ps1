@@ -6,8 +6,21 @@ $coneras = @("K109","K110","K112","K113","K114","K115","K117","K118","K119","K12
 foreach ($k in $coneras) {
     $zip = Join-Path $dst "$k.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
-    $fullPaths = $files | ForEach-Object { Join-Path $src $_ }
-    Compress-Archive -Path $fullPaths -DestinationPath $zip -CompressionLevel Optimal
+
+    $tmp = Join-Path $PSScriptRoot "_tmp_$k"
+    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+    foreach ($f in $files) {
+        Copy-Item (Join-Path $src $f) (Join-Path $tmp $f) -Force
+    }
+
+    $configPath = Join-Path $tmp "sync-config.txt"
+    $line1 = [System.IO.File]::ReadAllLines((Join-Path $src "sync-config.txt"))[0]
+    [System.IO.File]::WriteAllLines($configPath, @($line1, "conera_name=$k"), [System.Text.Encoding]::ASCII)
+
+    Compress-Archive -Path "$tmp\*" -DestinationPath $zip -CompressionLevel Optimal
+    Remove-Item $tmp -Recurse -Force
     Write-Host "$k.zip"
 }
 Write-Host "OK: $($coneras.Count) zips"
