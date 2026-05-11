@@ -1,0 +1,1 @@
+<html><body><pre>{"checksum": "abc", "version": "v123"}</pre></body></html>

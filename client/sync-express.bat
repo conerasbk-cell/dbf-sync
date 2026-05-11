@@ -73,19 +73,28 @@ tasklist /fi "imagename eq !BROWSER_EXE!" 2>nul | find /i "!BROWSER_EXE!" >nul
 if not errorlevel 1 if !WAIT_COUNT! lss 30 goto WAIT_VER
 taskkill /f /im !BROWSER_EXE! >nul 2>nul
 
-set VERSION=
-for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
+REM === Extraer version con VBScript (busca "version":" en HTML/JSON) ===
+> "%TEMP%\getver.vbs" echo Set fso = CreateObject("Scripting.FileSystemObject")
+>> "%TEMP%\getver.vbs" echo data = fso.OpenTextFile(WScript.Arguments(0)).ReadAll()
+>> "%TEMP%\getver.vbs" echo p = InStr(data, """version"":""")
+>> "%TEMP%\getver.vbs" echo If p ^> 0 Then
+>> "%TEMP%\getver.vbs" echo     s = Mid(data, p + 11)
+>> "%TEMP%\getver.vbs" echo     q = InStr(s, """")
+>> "%TEMP%\getver.vbs" echo     If q ^> 0 Then WScript.Echo Left(s, q - 1)
+>> "%TEMP%\getver.vbs" echo End If
+
+for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver.txt"') do set "VERSION=%%v"
 
 if "%VERSION%"=="" (
     echo  Reintentando con bitsadmin...
     bitsadmin /transfer dbfver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_ver2.txt" >nul 2>nul
-    for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver2.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
+    for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver2.txt"') do set "VERSION=%%v"
 )
 
 if "%VERSION%"=="" (
     echo  Reintentando con certutil...
     certutil -urlcache -split -f "%SERVER_URL%/api/version" "%TEMP%\dbf_ver3.txt" >nul 2>nul
-    for /f "tokens=2 delims=:,}" %%a in ('type "%TEMP%\dbf_ver3.txt" 2^>nul ^| find "version"') do set "VERSION=%%~a"
+    for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver3.txt"') do set "VERSION=%%v"
 )
 
 if "%VERSION%"=="" (
