@@ -55,25 +55,7 @@ echo [%date% %time%] INICIO: %CONERA% %BROWSER_NAME% >> "%LOG_FILE%"
 REM ===== 1. VERSION =====
 echo [1/3] Obteniendo version del servidor...
 
-del "%TEMP%\dbf_ver.txt" 2>nul
-
-if %BROWSER_CHROME% equ 1 (
-    start /min "" "%BROWSER%" --headless --disable-gpu --no-sandbox --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
-) else (
-    start /min "" "%BROWSER%" --headless --window-size 1,1 "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver.txt" 2>nul
-)
-
-set WAIT_COUNT=0
-:WAIT_VER
-timeout /t 1 /nobreak >nul
-set /a WAIT_COUNT+=1
-set BROWSER_EXE=chrome.exe
-if %BROWSER_FIREFOX% equ 1 set BROWSER_EXE=firefox.exe
-tasklist /fi "imagename eq !BROWSER_EXE!" 2>nul | find /i "!BROWSER_EXE!" >nul
-if not errorlevel 1 if !WAIT_COUNT! lss 30 goto WAIT_VER
-taskkill /f /im !BROWSER_EXE! >nul 2>nul
-
-REM === Extraer version con VBScript (busca "version":" en HTML/JSON) ===
+REM === Crear VBScript auxiliar para extraer version del JSON ===
 > "%TEMP%\getver.vbs" echo Set fso = CreateObject("Scripting.FileSystemObject")
 >> "%TEMP%\getver.vbs" echo data = fso.OpenTextFile(WScript.Arguments(0)).ReadAll()
 >> "%TEMP%\getver.vbs" echo p = InStr(data, """version"":""")
@@ -83,18 +65,30 @@ REM === Extraer version con VBScript (busca "version":" en HTML/JSON) ===
 >> "%TEMP%\getver.vbs" echo     If q ^> 0 Then WScript.Echo Left(s, q - 1)
 >> "%TEMP%\getver.vbs" echo End If
 
+REM bitsadmin (funciona con TLS 1.2, no abre ventanas)
+echo   bitsadmin...
+bitsadmin /transfer dbfver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_ver.txt" >nul 2>nul
 for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver.txt"') do set "VERSION=%%v"
 
 if "%VERSION%"=="" (
-    echo  Reintentando con bitsadmin...
-    bitsadmin /transfer dbfver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_ver2.txt" >nul 2>nul
+    echo  Reintentando con certutil...
+    certutil -urlcache -split -f "%SERVER_URL%/api/version" "%TEMP%\dbf_ver2.txt" >nul 2>nul
     for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver2.txt"') do set "VERSION=%%v"
 )
 
 if "%VERSION%"=="" (
-    echo  Reintentando con certutil...
-    certutil -urlcache -split -f "%SERVER_URL%/api/version" "%TEMP%\dbf_ver3.txt" >nul 2>nul
-    for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver3.txt"') do set "VERSION=%%v"
+    echo  Reintentando con navegador headless...
+    if not "%BROWSER%"=="" (
+        if %BROWSER_CHROME% equ 1 (
+            start /min "" "%BROWSER%" --headless --disable-gpu --no-sandbox --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver3.txt" 2>nul
+        ) else (
+            start /min "" "%BROWSER%" --headless --window-size 1,1 "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver3.txt" 2>nul
+        )
+        timeout /t 10 /nobreak >nul
+        taskkill /f /im chrome.exe >nul 2>nul
+        taskkill /f /im firefox.exe >nul 2>nul
+        for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver3.txt"') do set "VERSION=%%v"
+    )
 )
 
 if "%VERSION%"=="" (
