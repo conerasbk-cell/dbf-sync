@@ -295,7 +295,8 @@ timeout /t 3 /nobreak >nul
 echo  OK
 echo [%date% %time%] PASO6 OK >> "%LOG_FILE%"
 
-del "%ZIP_FILE%" "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" 2>nul
+if defined ZIP_FILE del "%ZIP_FILE%" 2>nul
+del "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" "%TEMP%\dbf_version3.txt" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
 
 echo.
@@ -317,8 +318,8 @@ set TASK_NAME=DBF_Sync_%CONERA%
 REM Eliminar tarea anterior si existe
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>>"%LOG_FILE%"
 
-REM Crear tarea cada 5 minutos (usa sync-checkin.vbs con PowerShell, no abre IE)
-schtasks /create /tn "%TASK_NAME%" /tr "cscript //nologo \"%~dp0sync-checkin.vbs\" \"%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%\"" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
+REM Crear tarea cada 5 minutos (PowerShell directo, sin IE, sin problemas de comillas)
+schtasks /create /tn "%TASK_NAME%" /tr "powershell -ExecutionPolicy Bypass -Command try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') | Out-Null" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
 
 if %errorlevel% equ 0 (
     echo  Tarea creada: %TASK_NAME% (cada 5 min)
