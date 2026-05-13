@@ -51,8 +51,27 @@ echo [%date% %time%] PASO1 TLS OK >> "%LOG_FILE%"
 REM ===== PASO 2: VERSION =====
 echo [2/6] Obteniendo version del servidor...
 set VERSION=
-cscript //nologo "%~dp0sync-download.vbs" version > "%TEMP%\dbf_version.txt" 2>>"%LOG_FILE%"
-set /p VERSION=<"%TEMP%\dbf_version.txt"
+
+REM VBScript auxiliar para extraer version del JSON
+> "%TEMP%\getver.vbs" echo Set fso = CreateObject("Scripting.FileSystemObject")
+>> "%TEMP%\getver.vbs" echo data = fso.OpenTextFile(WScript.Arguments(0)).ReadAll()
+>> "%TEMP%\getver.vbs" echo p = InStr(data, """version"":""")
+>> "%TEMP%\getver.vbs" echo If p ^> 0 Then
+>> "%TEMP%\getver.vbs" echo     s = Mid(data, p + 11)
+>> "%TEMP%\getver.vbs" echo     q = InStr(s, """")
+>> "%TEMP%\getver.vbs" echo     If q ^> 0 Then WScript.Echo Left(s, q - 1)
+>> "%TEMP%\getver.vbs" echo End If
+
+REM bitsadmin (TLS 1.2 configurado arriba, no abre ventanas)
+echo   bitsadmin...
+bitsadmin /transfer dbfsyncver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_version.txt" >nul 2>nul
+for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_version.txt" 2^>nul') do set "VERSION=%%v"
+
+if "%VERSION%"=="" (
+    echo  Intentando certutil...
+    certutil -urlcache -split -f "%SERVER_URL%/api/version" "%TEMP%\dbf_version2.txt" >nul 2>nul
+    for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_version2.txt" 2^>nul') do set "VERSION=%%v"
+)
 
 if "%VERSION%"=="" (
     echo  Intentando PowerShell...
@@ -60,8 +79,8 @@ if "%VERSION%"=="" (
 "try { [System.Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; " ^
 "try { $w = New-Object Net.WebClient; $r = $w.DownloadString('%SERVER_URL%/api/version'); " ^
 "$m = [regex]::Match($r, '\"\"version\"\":\s*\"\"([^\"]+)\"\"'); if($m.Success){$m.Groups[1].Value}else{''} " ^
-"} catch { '' }" > "%TEMP%\dbf_version2.txt" 2>>"%LOG_FILE%"
-    set /p VERSION=<"%TEMP%\dbf_version2.txt"
+"} catch { '' }" > "%TEMP%\dbf_version3.txt" 2>>"%LOG_FILE%"
+    set /p VERSION=<"%TEMP%\dbf_version3.txt"
 )
 
 if "%VERSION%"=="" (
