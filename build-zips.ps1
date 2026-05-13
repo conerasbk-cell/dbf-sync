@@ -1,6 +1,6 @@
 $src = Join-Path $PSScriptRoot "client"
 $dst = Join-Path $PSScriptRoot "zips"
-$files = "dbf-sync-client-xp.vbs","sync-download.vbs","sync-conera.bat","sync-express.bat","sync-config.txt"
+$files = "dbf-sync-client-xp.vbs","sync-download.vbs","sync-conera.bat","sync-express.bat","sync-checkin.vbs","sync-config.txt"
 $coneras = @("K109","K110","K112","K113","K114","K115","K117","K118","K119","K120","K121","K124","K125","K126","K127","K128","K129","K132","K133","K135","K136","K137","K139","K140","K143","K144")
 
 foreach ($k in $coneras) {

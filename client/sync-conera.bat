@@ -279,11 +279,11 @@ REM ===== CHECK-IN =====
 echo [6/6] Enviando check-in...
 echo [%date% %time%] PASO6 CHECKIN >> "%LOG_FILE%"
 
-REM VBScript checkin (usa Chrome fallback via FetchUrl, no se cuelga)
-cscript //nologo "%~dp0sync-download.vbs" register >>"%LOG_FILE%" 2>&1
-cscript //nologo "%~dp0sync-download.vbs" checkin "%VERSION%" >>"%LOG_FILE%" 2>&1
+REM Check-in con bitsadmin (no abre IE)
+bitsadmin /transfer dbfreg /download /priority low "%SERVER_URL%/api/conera/register?name=%CONERA%" "%TEMP%\dbf_reg.txt" >nul 2>nul
+bitsadmin /transfer dbfci /download /priority low "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" "%TEMP%\dbf_ci.txt" >nul 2>nul
 
-REM Chrome headless checkin (rapido, TLS propio)
+REM Chrome headless checkin (TLS propio, sin ventanas)
 set CHROME_PATH2=
 for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH2=%%~p
 if "%CHROME_PATH2%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH2=chrome.exe
@@ -313,13 +313,12 @@ echo.
 echo [%date% %time%] Creando schtask... >> "%LOG_FILE%"
 
 set TASK_NAME=DBF_Sync_%CONERA%
-set TASK_SCRIPT="%~dp0sync-download.vbs"
 
 REM Eliminar tarea anterior si existe
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>>"%LOG_FILE%"
 
-REM Crear tarea cada 5 minutos
-schtasks /create /tn "%TASK_NAME%" /tr "cscript //nologo \"%TASK_SCRIPT%\" checkin \"%VERSION%\"" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
+REM Crear tarea cada 5 minutos (usa sync-checkin.vbs con PowerShell, no abre IE)
+schtasks /create /tn "%TASK_NAME%" /tr "cscript //nologo \"%~dp0sync-checkin.vbs\" \"%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%\"" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
 
 if %errorlevel% equ 0 (
     echo  Tarea creada: %TASK_NAME% (cada 5 min)
