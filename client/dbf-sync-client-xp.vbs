@@ -21,7 +21,7 @@ Set shell = CreateObject("WScript.Shell")
 ' ===========================================
 
 ' Valores por defecto (si no hay sync-config.txt)
-strServerUrl = "https://ejemplo.trycloudflare.com"
+strServerUrl = "https://dbf-sync.onrender.com"
 strConeraName = "NOMBRE-DE-LA-CONERA"
 strDataDir = "C:\Bootdrv\AlohaQs\DATA"
 strNewDataDir = "C:\Bootdrv\AlohaQs\NEWDATA"
@@ -567,6 +567,15 @@ End Sub
 If LCase(Right(WScript.FullName, 11)) = "wscript.exe" Then
     ' running as wscript - no console
 End If
+
+' Aplicar TLS 1.2 registry fixes
+On Error Resume Next
+shell.Run "reg add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp"" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f", 0, True
+shell.Run "reg add ""HKLM\SOFTWARE\Microsoft\.NETFramework\v4.0.30319"" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f", 0, True
+shell.Run "reg add ""HKLM\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319"" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f", 0, True
+shell.Run "reg add ""HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client"" /v Enabled /t REG_DWORD /d 1 /f", 0, True
+shell.Run "reg add ""HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client"" /v DisabledByDefault /t REG_DWORD /d 0 /f", 0, True
+On Error Goto 0
 
 Log "============================================"
 Log "DBF Sync Client iniciado - " & strConeraName

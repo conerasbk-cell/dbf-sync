@@ -23,6 +23,10 @@ if exist "%~dp0sync-config.txt" (
 )
 
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f >nul 2>nul
+reg add "HKLM\SOFTWARE\Microsoft\.NETFramework\v4.0.30319" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f >nul 2>nul
+reg add "HKLM\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f >nul 2>nul
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client" /v Enabled /t REG_DWORD /d 1 /f >nul 2>nul
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client" /v DisabledByDefault /t REG_DWORD /d 0 /f >nul 2>nul
 
 REM ===== DETECTAR NAVEGADOR =====
 set BROWSER=
@@ -52,10 +56,52 @@ echo =============================================
 echo.
 echo [%date% %time%] INICIO: %CONERA% %BROWSER_NAME% >> "%LOG_FILE%"
 
-REM ===== 1. VERSION =====
-echo [1/3] Obteniendo version del servidor...
+REM ===== 1. REGISTRO =====
+echo [1/5] Registrando conera en el servidor...
+echo [%date% %time%] REGISTRO >> "%LOG_FILE%"
 
-REM === Crear VBScript auxiliar para extraer version del JSON ===
+REM Generar VBS auxiliar para registro via COM objects
+> "%TEMP%\dbf_register.vbs" echo Option Explicit
+>>"%TEMP%\dbf_register.vbs" echo Dim url
+>>"%TEMP%\dbf_register.vbs" echo url = WScript.Arguments(0)
+>>"%TEMP%\dbf_register.vbs" echo Dim methods, i, obj
+>>"%TEMP%\dbf_register.vbs" echo methods = Array("WinHttp.WinHttpRequest.5.1", "MSXML2.ServerXMLHTTP.6.0", "MSXML2.ServerXMLHTTP.3.0", "MSXML2.XMLHTTP.6.0", "MSXML2.XMLHTTP.3.0", "Microsoft.XMLHTTP")
+>>"%TEMP%\dbf_register.vbs" echo On Error Resume Next
+>>"%TEMP%\dbf_register.vbs" echo For i = 0 To UBound(methods)
+>>"%TEMP%\dbf_register.vbs" echo     Set obj = Nothing
+>>"%TEMP%\dbf_register.vbs" echo     Set obj = CreateObject(methods(i))
+>>"%TEMP%\dbf_register.vbs" echo     If Err.Number = 0 Then
+>>"%TEMP%\dbf_register.vbs" echo         If InStr(methods(i), "WinHttp") > 0 Then obj.Option(9) = 4096
+>>"%TEMP%\dbf_register.vbs" echo         obj.Open "GET", url, False
+>>"%TEMP%\dbf_register.vbs" echo         obj.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+>>"%TEMP%\dbf_register.vbs" echo         obj.Send
+>>"%TEMP%\dbf_register.vbs" echo         If Err.Number = 0 And obj.Status = 200 Then WScript.Quit 0
+>>"%TEMP%\dbf_register.vbs" echo     End If
+>>"%TEMP%\dbf_register.vbs" echo     Err.Clear
+>>"%TEMP%\dbf_register.vbs" echo Next
+>>"%TEMP%\dbf_register.vbs" echo WScript.Quit 1
+
+echo   - PowerShell...
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') | Out-Null" 2>>"%LOG_FILE%"
+if %errorlevel% equ 0 (
+    echo  OK (PowerShell)
+    echo [%date% %time%] REGISTRO PowerShell OK >> "%LOG_FILE%"
+) else (
+    echo   - COM objects...
+    cscript //nologo "%TEMP%\dbf_register.vbs" "%SERVER_URL%/api/conera/register?name=%CONERA%" >>"%LOG_FILE%" 2>&1
+    if %errorlevel% equ 0 (
+        echo  OK (COM)
+        echo [%date% %time%] REGISTRO COM OK >> "%LOG_FILE%"
+    ) else (
+        echo  [!] No se pudo registrar
+        echo [%date% %time%] REGISTRO FALLIDO >> "%LOG_FILE%"
+    )
+)
+
+REM ===== 2. VERSION =====
+echo [2/5] Obteniendo version del servidor...
+
+REM VBScript auxiliar para extraer version del JSON
 > "%TEMP%\getver.vbs" echo Set fso = CreateObject("Scripting.FileSystemObject")
 >> "%TEMP%\getver.vbs" echo data = fso.OpenTextFile(WScript.Arguments(0)).ReadAll()
 >> "%TEMP%\getver.vbs" echo p = InStr(data, """version"":""")
@@ -65,19 +111,57 @@ REM === Crear VBScript auxiliar para extraer version del JSON ===
 >> "%TEMP%\getver.vbs" echo     If q ^> 0 Then WScript.Echo Left(s, q - 1)
 >> "%TEMP%\getver.vbs" echo End If
 
-REM bitsadmin (funciona con TLS 1.2, no abre ventanas)
-echo   bitsadmin...
-bitsadmin /transfer dbfver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_ver.txt" >nul 2>nul
-for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver.txt"') do set "VERSION=%%v"
+REM VBScript que obtiene version via COM objects directamente
+> "%TEMP%\getver_com.vbs" echo Option Explicit
+>>"%TEMP%\getver_com.vbs" echo Dim url, methods, i, obj, result
+>>"%TEMP%\getver_com.vbs" echo url = WScript.Arguments(0)
+>>"%TEMP%\getver_com.vbs" echo methods = Array("WinHttp.WinHttpRequest.5.1", "MSXML2.ServerXMLHTTP.6.0", "MSXML2.ServerXMLHTTP.3.0", "MSXML2.XMLHTTP.6.0", "MSXML2.XMLHTTP.3.0", "Microsoft.XMLHTTP")
+>>"%TEMP%\getver_com.vbs" echo On Error Resume Next
+>>"%TEMP%\getver_com.vbs" echo For i = 0 To UBound(methods)
+>>"%TEMP%\getver_com.vbs" echo     Set obj = Nothing
+>>"%TEMP%\getver_com.vbs" echo     Set obj = CreateObject(methods(i))
+>>"%TEMP%\getver_com.vbs" echo     If Err.Number = 0 Then
+>>"%TEMP%\getver_com.vbs" echo         If InStr(methods(i), "WinHttp") > 0 Then obj.Option(9) = 4096
+>>"%TEMP%\getver_com.vbs" echo         obj.Open "GET", url, False
+>>"%TEMP%\getver_com.vbs" echo         obj.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+>>"%TEMP%\getver_com.vbs" echo         obj.Send
+>>"%TEMP%\getver_com.vbs" echo         If Err.Number = 0 And obj.Status = 200 Then
+>>"%TEMP%\getver_com.vbs" echo             result = obj.ResponseText
+>>"%TEMP%\getver_com.vbs" echo             Dim p, s, q
+>>"%TEMP%\getver_com.vbs" echo             p = InStr(result, """version"":""")
+>>"%TEMP%\getver_com.vbs" echo             If p ^> 0 Then
+>>"%TEMP%\getver_com.vbs" echo                 s = Mid(result, p + 11)
+>>"%TEMP%\getver_com.vbs" echo                 q = InStr(s, """")
+>>"%TEMP%\getver_com.vbs" echo                 If q ^> 0 Then WScript.Echo Left(s, q - 1)
+>>"%TEMP%\getver_com.vbs" echo             End If
+>>"%TEMP%\getver_com.vbs" echo             WScript.Quit 0
+>>"%TEMP%\getver_com.vbs" echo         End If
+>>"%TEMP%\getver_com.vbs" echo     End If
+>>"%TEMP%\getver_com.vbs" echo     Err.Clear
+>>"%TEMP%\getver_com.vbs" echo Next
+>>"%TEMP%\getver_com.vbs" echo WScript.Quit 1
 
+REM METODO 1: COM objects
+echo   COM objects...
+for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver_com.vbs" "%SERVER_URL%/api/version" 2^>nul') do set "VERSION=%%v"
+
+REM METODO 2: bitsadmin
 if "%VERSION%"=="" (
-    echo  Reintentando con certutil...
+    echo   bitsadmin...
+    bitsadmin /transfer dbfver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_ver.txt" >nul 2>nul
+    for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver.txt"') do set "VERSION=%%v"
+)
+
+REM METODO 3: certutil
+if "%VERSION%"=="" (
+    echo  Intentando certutil...
     certutil -urlcache -split -f "%SERVER_URL%/api/version" "%TEMP%\dbf_ver2.txt" >nul 2>nul
     for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_ver2.txt"') do set "VERSION=%%v"
 )
 
+REM METODO 4: navegador headless
 if "%VERSION%"=="" (
-    echo  Reintentando con navegador headless...
+    echo  Intentando navegador headless...
     if not "%BROWSER%"=="" (
         if %BROWSER_CHROME% equ 1 (
             start /min "" "%BROWSER%" --headless --disable-gpu --no-sandbox --dump-dom "%SERVER_URL%/api/version" > "%TEMP%\dbf_ver3.txt" 2>nul
@@ -108,14 +192,14 @@ if exist "%VERSION_FILE%" set /p LOCAL_VER=<"%VERSION_FILE%"
 if "%LOCAL_VER%"=="%VERSION%" (
     echo Ya actualizado: %VERSION%
     echo [%date% %time%] YA ACTUALIZADO: %VERSION% >> "%LOG_FILE%"
-    goto run_iberqs
+    goto checkin
 )
 echo Version local: %LOCAL_VER%
 echo [%date% %time%] LOCAL: %LOCAL_VER% SERVIDOR: %VERSION% >> "%LOG_FILE%"
 echo.
 
-REM ===== 2. DOWNLOAD =====
-echo [2/3] Descargando %VERSION%...
+REM ===== 3. DOWNLOAD =====
+echo [3/5] Descargando %VERSION%...
 
 set ZIP_FILE=%TEMP%\dbf_%VERSION%.zip
 set DOWNLOADS=%USERPROFILE%\Downloads
@@ -202,8 +286,8 @@ echo Zip descargado OK
 echo [%date% %time%] DESCARGA OK >> "%LOG_FILE%"
 echo.
 
-REM ===== 3. EXTRACT =====
-echo [3/3] Extrayendo archivos...
+REM ===== 4. EXTRACT =====
+echo [4/5] Extrayendo archivos...
 echo [%date% %time%] EXTRACCION >> "%LOG_FILE%"
 
 set EXTRACT_DIR=%TEMP%\dbf_extract
@@ -228,8 +312,31 @@ echo %VERSION% > "%VERSION_FILE%"
 echo Actualizado a %VERSION%
 echo [%date% %time%] ACTUALIZADO: %VERSION% >> "%LOG_FILE%"
 
+:checkin
+echo.
+REM ===== 5. CHECK-IN =====
+echo [5/5] Enviando check-in...
+echo [%date% %time%] CHECKIN >> "%LOG_FILE%"
+echo   - PowerShell...
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') | Out-Null" 2>>"%LOG_FILE%"
+if %errorlevel% equ 0 (
+    echo  OK
+    echo [%date% %time%] CHECKIN PowerShell OK >> "%LOG_FILE%"
+) else (
+    echo   - COM objects...
+    cscript //nologo "%TEMP%\dbf_register.vbs" "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >>"%LOG_FILE%" 2>&1
+    if %errorlevel% equ 0 (
+        echo  OK (COM)
+        echo [%date% %time%] CHECKIN COM OK >> "%LOG_FILE%"
+    ) else (
+        echo  [!] Check-in fallo
+        echo [%date% %time%] CHECKIN FALLIDO >> "%LOG_FILE%"
+    )
+)
+
 del "%ZIP_FILE%" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
+del "%TEMP%\getver.vbs" "%TEMP%\getver_com.vbs" "%TEMP%\dbf_register.vbs" 2>nul
 if defined CHROME_TEMP rmdir /s /q "!CHROME_TEMP!" 2>nul
 if defined FX_TEMP rmdir /s /q "!FX_TEMP!" 2>nul
 

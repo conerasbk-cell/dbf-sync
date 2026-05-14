@@ -1,6 +1,15 @@
 @echo off
 setlocal enabledelayedexpansion
 
+set SILENT=0
+if /i "%1"=="/silent" set SILENT=1
+
+if %SILENT% equ 1 (
+    set LOG_FILE=%TEMP%\dbf_sync_%COMPUTERNAME%.log
+    echo [%date% %time%] INICIO SILENT > "%LOG_FILE%"
+    goto :SILENT_START
+)
+
 title DBF Sync - %COMPUTERNAME%
 set LOG_FILE=%TEMP%\dbf_sync_%COMPUTERNAME%.log
 echo [%date% %time%] INICIO > "%LOG_FILE%"
@@ -9,6 +18,8 @@ echo =============================================
 echo   DBF Sync Conera - Actualizacion Manual
 echo =============================================
 echo.
+
+:SILENT_START
 
 REM ===== CONFIG =====
 set SERVER_URL=https://dbf-sync.onrender.com
@@ -43,13 +54,59 @@ echo =============================================
 echo.
 
 REM ===== PASO 1: TLS =====
-echo [1/6] Activando TLS 1.2...
+echo [1/7] Activando TLS 1.2...
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f >nul 2>nul
+reg add "HKLM\SOFTWARE\Microsoft\.NETFramework\v4.0.30319" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f >nul 2>nul
+reg add "HKLM\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f >nul 2>nul
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client" /v Enabled /t REG_DWORD /d 1 /f >nul 2>nul
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client" /v DisabledByDefault /t REG_DWORD /d 0 /f >nul 2>nul
 echo  OK
 echo [%date% %time%] PASO1 TLS OK >> "%LOG_FILE%"
 
-REM ===== PASO 2: VERSION =====
-echo [2/6] Obteniendo version del servidor...
+REM ===== PASO 2: REGISTRO (siempre ejecutar para que aparezca en el panel) =====
+echo [2/7] Registrando conera en el servidor...
+echo [%date% %time%] PASO2 REGISTRO >> "%LOG_FILE%"
+
+REM Generar VBS auxiliar para registro via COM objects (WinHttp/ServerXMLHTTP)
+> "%TEMP%\dbf_register.vbs" echo Option Explicit
+>>"%TEMP%\dbf_register.vbs" echo Dim url
+>>"%TEMP%\dbf_register.vbs" echo url = WScript.Arguments(0)
+>>"%TEMP%\dbf_register.vbs" echo Dim methods, i, obj
+>>"%TEMP%\dbf_register.vbs" echo methods = Array("WinHttp.WinHttpRequest.5.1", "MSXML2.ServerXMLHTTP.6.0", "MSXML2.ServerXMLHTTP.3.0", "MSXML2.XMLHTTP.6.0", "MSXML2.XMLHTTP.3.0", "Microsoft.XMLHTTP")
+>>"%TEMP%\dbf_register.vbs" echo On Error Resume Next
+>>"%TEMP%\dbf_register.vbs" echo For i = 0 To UBound(methods)
+>>"%TEMP%\dbf_register.vbs" echo     Set obj = Nothing
+>>"%TEMP%\dbf_register.vbs" echo     Set obj = CreateObject(methods(i))
+>>"%TEMP%\dbf_register.vbs" echo     If Err.Number = 0 Then
+>>"%TEMP%\dbf_register.vbs" echo         If InStr(methods(i), "WinHttp") > 0 Then obj.Option(9) = 4096
+>>"%TEMP%\dbf_register.vbs" echo         obj.Open "GET", url, False
+>>"%TEMP%\dbf_register.vbs" echo         obj.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+>>"%TEMP%\dbf_register.vbs" echo         obj.Send
+>>"%TEMP%\dbf_register.vbs" echo         If Err.Number = 0 And obj.Status = 200 Then WScript.Quit 0
+>>"%TEMP%\dbf_register.vbs" echo     End If
+>>"%TEMP%\dbf_register.vbs" echo     Err.Clear
+>>"%TEMP%\dbf_register.vbs" echo Next
+>>"%TEMP%\dbf_register.vbs" echo WScript.Quit 1
+
+echo   - PowerShell...
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') | Out-Null" 2>>"%LOG_FILE%"
+if %errorlevel% equ 0 (
+    echo  OK (PowerShell)
+    echo [%date% %time%] REGISTRO PowerShell OK >> "%LOG_FILE%"
+) else (
+    echo   - COM objects...
+    cscript //nologo "%TEMP%\dbf_register.vbs" "%SERVER_URL%/api/conera/register?name=%CONERA%" >>"%LOG_FILE%" 2>&1
+    if %errorlevel% equ 0 (
+        echo  OK (COM)
+        echo [%date% %time%] REGISTRO COM OK >> "%LOG_FILE%"
+    ) else (
+        echo  [!] No se pudo registrar
+        echo [%date% %time%] REGISTRO FALLIDO >> "%LOG_FILE%"
+    )
+)
+
+REM ===== PASO 3: VERSION =====
+echo [3/7] Obteniendo version del servidor...
 set VERSION=
 
 REM VBScript auxiliar para extraer version del JSON
@@ -62,10 +119,47 @@ REM VBScript auxiliar para extraer version del JSON
 >> "%TEMP%\getver.vbs" echo     If q ^> 0 Then WScript.Echo Left(s, q - 1)
 >> "%TEMP%\getver.vbs" echo End If
 
-REM bitsadmin (TLS 1.2 configurado arriba, no abre ventanas)
-echo   bitsadmin...
-bitsadmin /transfer dbfsyncver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_version.txt" >nul 2>nul
-for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_version.txt" 2^>nul') do set "VERSION=%%v"
+REM VBScript que obtiene version via COM objects (WinHttp/ServerXMLHTTP) directamente
+> "%TEMP%\getver_com.vbs" echo Option Explicit
+>>"%TEMP%\getver_com.vbs" echo Dim url, methods, i, obj, result
+>>"%TEMP%\getver_com.vbs" echo url = WScript.Arguments(0)
+>>"%TEMP%\getver_com.vbs" echo methods = Array("WinHttp.WinHttpRequest.5.1", "MSXML2.ServerXMLHTTP.6.0", "MSXML2.ServerXMLHTTP.3.0", "MSXML2.XMLHTTP.6.0", "MSXML2.XMLHTTP.3.0", "Microsoft.XMLHTTP")
+>>"%TEMP%\getver_com.vbs" echo On Error Resume Next
+>>"%TEMP%\getver_com.vbs" echo For i = 0 To UBound(methods)
+>>"%TEMP%\getver_com.vbs" echo     Set obj = Nothing
+>>"%TEMP%\getver_com.vbs" echo     Set obj = CreateObject(methods(i))
+>>"%TEMP%\getver_com.vbs" echo     If Err.Number = 0 Then
+>>"%TEMP%\getver_com.vbs" echo         If InStr(methods(i), "WinHttp") > 0 Then obj.Option(9) = 4096
+>>"%TEMP%\getver_com.vbs" echo         obj.Open "GET", url, False
+>>"%TEMP%\getver_com.vbs" echo         obj.SetRequestHeader "User-Agent", "DBF-Sync-Client/1.0"
+>>"%TEMP%\getver_com.vbs" echo         obj.Send
+>>"%TEMP%\getver_com.vbs" echo         If Err.Number = 0 And obj.Status = 200 Then
+>>"%TEMP%\getver_com.vbs" echo             result = obj.ResponseText
+>>"%TEMP%\getver_com.vbs" echo             Dim p, s, q
+>>"%TEMP%\getver_com.vbs" echo             p = InStr(result, """version"":""")
+>>"%TEMP%\getver_com.vbs" echo             If p ^> 0 Then
+>>"%TEMP%\getver_com.vbs" echo                 s = Mid(result, p + 11)
+>>"%TEMP%\getver_com.vbs" echo                 q = InStr(s, """")
+>>"%TEMP%\getver_com.vbs" echo                 If q ^> 0 Then WScript.Echo Left(s, q - 1)
+>>"%TEMP%\getver_com.vbs" echo             End If
+>>"%TEMP%\getver_com.vbs" echo             WScript.Quit 0
+>>"%TEMP%\getver_com.vbs" echo         End If
+>>"%TEMP%\getver_com.vbs" echo     End If
+>>"%TEMP%\getver_com.vbs" echo     Err.Clear
+>>"%TEMP%\getver_com.vbs" echo Next
+>>"%TEMP%\getver_com.vbs" echo WScript.Quit 1
+
+REM METODO 1: COM objects (WinHttp/ServerXMLHTTP - funcionaban antes en K124)
+echo   COM objects...
+for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver_com.vbs" "%SERVER_URL%/api/version" 2^>nul') do set "VERSION=%%v"
+echo [%date% %time%] COM VERSION: %VERSION% >> "%LOG_FILE%"
+
+REM METODO 2: bitsadmin (WinHTTP con TLS 1.2)
+if "%VERSION%"=="" (
+    echo   bitsadmin...
+    bitsadmin /transfer dbfsyncver /download /priority high "%SERVER_URL%/api/version" "%TEMP%\dbf_version.txt" >nul 2>nul
+    for /f "delims=" %%v in ('cscript //nologo "%TEMP%\getver.vbs" "%TEMP%\dbf_version.txt" 2^>nul') do set "VERSION=%%v"
+)
 
 if "%VERSION%"=="" (
     echo  Intentando certutil...
@@ -95,29 +189,29 @@ if "%VERSION%"=="" (
     exit /b 1
 )
 echo  OK: %VERSION%
-echo [%date% %time%] PASO2 VERSION: %VERSION% >> "%LOG_FILE%"
+echo [%date% %time%] PASO3 VERSION: %VERSION% >> "%LOG_FILE%"
 
-REM ===== PASO 3: COMPARAR =====
-echo [3/6] Verificando version local...
+REM ===== PASO 4: COMPARAR =====
+echo [4/7] Verificando version local...
 set LOCAL_VER=
 if exist "%VERSION_FILE%" (
     set /p LOCAL_VER=<"%VERSION_FILE%"
 )
 if "%LOCAL_VER%"=="%VERSION%" (
     echo  Ya actualizado: %VERSION%
-    echo [%date% %time%] PASO3 Ya actualizado >> "%LOG_FILE%"
+    echo [%date% %time%] PASO4 Ya actualizado >> "%LOG_FILE%"
     goto checkin_and_loop
 )
 echo  Local: %LOCAL_VER% ^| Servidor: %VERSION%
-echo [%date% %time%] PASO3 Local: %LOCAL_VER% Servidor: %VERSION% >> "%LOG_FILE%"
+echo [%date% %time%] PASO4 Local: %LOCAL_VER% Servidor: %VERSION% >> "%LOG_FILE%"
 
-REM ===== PASO 4: DESCARGAR =====
-echo [4/6] Descargando...
+REM ===== PASO 5: DESCARGAR =====
+echo [5/7] Descargando...
 title DBF Sync - %CONERA% - descargando...
 set ZIP_FILE=%TEMP%\dbf_sync_%VERSION%.zip
 set DOWNLOADS_DIR=%USERPROFILE%\Downloads
 del "%ZIP_FILE%" 2>nul
-echo [%date% %time%] PASO4 INICIO >> "%LOG_FILE%"
+echo [%date% %time%] PASO5 INICIO >> "%LOG_FILE%"
 
 REM ===== METODO 1: CHROME =====
 set CHROME_PATH=
@@ -237,6 +331,11 @@ echo.
 echo  Abra Chrome y navegue a:
 echo  %SERVER_URL%/api/download/%VERSION%
 echo.
+if %SILENT% equ 1 (
+    echo  En modo automatico, continuando sin actualizar...
+    echo [%date% %time%] ERROR descarga en modo silent >> "%LOG_FILE%"
+    goto checkin_and_loop
+)
 echo  Guarde el archivo en %ZIP_FILE%, luego presione Enter...
 pause
 if not exist "%ZIP_FILE%" (
@@ -246,11 +345,11 @@ if not exist "%ZIP_FILE%" (
 
 :extraer
 echo  ZIP descargado OK
-echo [%date% %time%] PASO4 DESCARGA OK >> "%LOG_FILE%"
+echo [%date% %time%] PASO5 DESCARGA OK >> "%LOG_FILE%"
 
-REM ===== PASO 5: EXTRAER =====
-echo [5/6] Extrayendo archivos...
-echo [%date% %time%] PASO5 EXTRACCION >> "%LOG_FILE%"
+REM ===== PASO 6: EXTRAER =====
+echo [6/7] Extrayendo archivos...
+echo [%date% %time%] PASO6 EXTRACCION >> "%LOG_FILE%"
 set EXTRACT_DIR=%TEMP%\dbf_sync_extract
 if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" 2>nul
 mkdir "%EXTRACT_DIR%" 2>nul
@@ -271,32 +370,35 @@ for /r "%EXTRACT_DIR%" %%f in (*.dbf) do (
 )
 
 echo %VERSION% > "%VERSION_FILE%" 2>>"%LOG_FILE%"
-echo [%date% %time%] PASO5 OK >> "%LOG_FILE%"
+echo [%date% %time%] PASO6 OK >> "%LOG_FILE%"
 echo  OK
 
 REM ===== CHECK-IN =====
 :checkin_and_loop
-echo [6/6] Enviando check-in...
-echo [%date% %time%] PASO6 CHECKIN >> "%LOG_FILE%"
+echo [7/7] Enviando check-in...
+echo [%date% %time%] PASO7 CHECKIN >> "%LOG_FILE%"
 
-REM Check-in con bitsadmin (no abre IE)
-bitsadmin /transfer dbfreg /download /priority low "%SERVER_URL%/api/conera/register?name=%CONERA%" "%TEMP%\dbf_reg.txt" >nul 2>nul
-bitsadmin /transfer dbfci /download /priority low "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" "%TEMP%\dbf_ci.txt" >nul 2>nul
-
-REM Chrome headless checkin (TLS propio, sin ventanas)
-set CHROME_PATH2=
-for %%p in ("%PROGRAMFILES%\Google\Chrome\Application\chrome.exe" "%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe" "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe") do if exist "%%~p" set CHROME_PATH2=%%~p
-if "%CHROME_PATH2%"=="" where chrome.exe >nul 2>nul && set CHROME_PATH2=chrome.exe
-if not "%CHROME_PATH2%"=="" (
-    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/register?name=%CONERA%"
-    start /min "" "%CHROME_PATH2%" --headless --disable-gpu --no-sandbox "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%"
+REM Check-in via PowerShell
+echo   - PowerShell...
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') | Out-Null" 2>>"%LOG_FILE%"
+if %errorlevel% equ 0 (
+    echo  OK
+    echo [%date% %time%] CHECKIN PowerShell OK >> "%LOG_FILE%"
+) else (
+    echo   - COM objects...
+    cscript //nologo "%TEMP%\dbf_register.vbs" "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >>"%LOG_FILE%" 2>&1
+    if %errorlevel% equ 0 (
+        echo  OK (COM)
+        echo [%date% %time%] CHECKIN COM OK >> "%LOG_FILE%"
+    ) else (
+        echo  [!] Check-in fallo
+        echo [%date% %time%] CHECKIN FALLIDO >> "%LOG_FILE%"
+    )
 )
-timeout /t 3 /nobreak >nul
-echo  OK
-echo [%date% %time%] PASO6 OK >> "%LOG_FILE%"
 
 if defined ZIP_FILE del "%ZIP_FILE%" 2>nul
 del "%TEMP%\dbf_version.txt" "%TEMP%\dbf_version2.txt" "%TEMP%\dbf_version3.txt" 2>nul
+del "%TEMP%\getver.vbs" "%TEMP%\getver_com.vbs" "%TEMP%\dbf_register.vbs" 2>nul
 rmdir /s /q "%EXTRACT_DIR%" 2>nul
 
 echo.
@@ -306,6 +408,12 @@ echo   Hora: %date% %time%
 echo =============================================
 echo.
 
+REM En modo silent, no recrear la tarea (ya existe desde la ejecucion manual)
+if %SILENT% equ 1 (
+    echo [%date% %time%] SILENT: tarea ya existe, saltando >> "%LOG_FILE%"
+    goto skip_schtasks
+)
+
 REM ===== CREAR TAREA PROGRAMADA =====
 echo.
 echo  Creando tarea programada para check-in cada 5 minutos...
@@ -314,12 +422,18 @@ echo.
 echo [%date% %time%] Creando schtask... >> "%LOG_FILE%"
 
 set TASK_NAME=DBF_Sync_%CONERA%
+set TASK_WRAPPER=%TEMP%\dbf_sync_%CONERA%_checkin.bat
+
+REM Crear wrapper batch que ejecuta sync-conera.bat /silent (ciclo completo)
+>"%TASK_WRAPPER%" echo @echo off
+>>"%TASK_WRAPPER%" echo @"%~dp0sync-conera.bat" /silent
+>>"%TASK_WRAPPER%" echo exit /b 0
 
 REM Eliminar tarea anterior si existe
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>>"%LOG_FILE%"
 
-REM Crear tarea cada 5 minutos (PowerShell directo, sin IE, sin problemas de comillas)
-schtasks /create /tn "%TASK_NAME%" /tr "powershell -ExecutionPolicy Bypass -Command try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') | Out-Null" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
+REM Crear tarea cada 5 minutos (ejecuta el ciclo completo: version, descarga, check-in)
+schtasks /create /tn "%TASK_NAME%" /tr "%TASK_WRAPPER%" /sc minute /mo 5 /f >>"%LOG_FILE%" 2>&1
 
 if %errorlevel% equ 0 (
     echo  Tarea creada: %TASK_NAME% (cada 5 min)
@@ -327,18 +441,23 @@ if %errorlevel% equ 0 (
 ) else (
     echo  [!] No se pudo crear tarea programada
     echo [%date% %time%] schtask ERROR >> "%LOG_FILE%"
-    pause
+    if %SILENT% equ 1 (
+        echo [%date% %time%] schtask ERROR en modo silent >> "%LOG_FILE%"
+    ) else (
+        pause
+    )
 )
 
+:skip_schtasks
 echo.
 echo =============================================
 echo   Actualizado: %VERSION%
-echo   Check-in automatico cada 5 minutos
-echo   Tarea: %TASK_NAME%
+echo   Hora: %date% %time%
 echo =============================================
 echo.
 echo  Log: %LOG_FILE%
 echo.
+if %SILENT% equ 1 exit /b 0
 echo  Presione Enter para cerrar...
 pause >nul
 exit /b 0

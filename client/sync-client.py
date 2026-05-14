@@ -17,7 +17,7 @@ from datetime import datetime
 # --- Config ---
 CONFIG_FILE = Path(__file__).parent / "sync-config.json"
 DEFAULT_CONFIG = {
-    "server_url": "http://100.100.100.100:8080",
+    "server_url": "https://dbf-sync.onrender.com",
     "conera_name": "",
     "check_interval": 300,
     "data_dir": "C:\\Bootdrv\\AlohaQs\\DATA",

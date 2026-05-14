@@ -7,6 +7,15 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 Set args = WScript.Arguments
 
+' Aplicar TLS 1.2 registry fixes
+On Error Resume Next
+shell.Run "reg add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp"" /v DefaultSecureProtocols /t REG_DWORD /d 0xA00 /f", 0, True
+shell.Run "reg add ""HKLM\SOFTWARE\Microsoft\.NETFramework\v4.0.30319"" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f", 0, True
+shell.Run "reg add ""HKLM\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319"" /v SchUseStrongCrypto /t REG_DWORD /d 1 /f", 0, True
+shell.Run "reg add ""HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client"" /v Enabled /t REG_DWORD /d 1 /f", 0, True
+shell.Run "reg add ""HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client"" /v DisabledByDefault /t REG_DWORD /d 0 /f", 0, True
+On Error Goto 0
+
 Call LoadConfig()
 
 If args.Count > 0 Then
