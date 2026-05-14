@@ -89,18 +89,18 @@ REM Generar VBS auxiliar para registro via COM objects (WinHttp/ServerXMLHTTP)
 >>"%TEMP%\dbf_register.vbs" echo WScript.Quit 1
 
 echo   - PowerShell...
-powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') | Out-Null" 2>>"%LOG_FILE%"
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/register?name=%CONERA%') | Out-Null; exit 0 } catch { exit 1 }" 2>>"%LOG_FILE%"
 if %errorlevel% equ 0 (
-    echo  OK (PowerShell)
+    echo  OK [PowerShell]
     echo [%date% %time%] REGISTRO PowerShell OK >> "%LOG_FILE%"
 ) else (
     echo   - COM objects...
     cscript //nologo "%TEMP%\dbf_register.vbs" "%SERVER_URL%/api/conera/register?name=%CONERA%" >>"%LOG_FILE%" 2>&1
     if %errorlevel% equ 0 (
-        echo  OK (COM)
+        echo  OK [COM]
         echo [%date% %time%] REGISTRO COM OK >> "%LOG_FILE%"
     ) else (
-        echo  [!] No se pudo registrar
+        echo  [!!] No se pudo registrar
         echo [%date% %time%] REGISTRO FALLIDO >> "%LOG_FILE%"
     )
 )
@@ -380,18 +380,18 @@ echo [%date% %time%] PASO7 CHECKIN >> "%LOG_FILE%"
 
 REM Check-in via PowerShell
 echo   - PowerShell...
-powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072 } catch {}; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') | Out-Null" 2>>"%LOG_FILE%"
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = 3072; (New-Object Net.WebClient).DownloadString('%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%') | Out-Null; exit 0 } catch { exit 1 }" 2>>"%LOG_FILE%"
 if %errorlevel% equ 0 (
-    echo  OK
+    echo  OK [PowerShell]
     echo [%date% %time%] CHECKIN PowerShell OK >> "%LOG_FILE%"
 ) else (
     echo   - COM objects...
     cscript //nologo "%TEMP%\dbf_register.vbs" "%SERVER_URL%/api/conera/checkin?name=%CONERA%&version=%VERSION%" >>"%LOG_FILE%" 2>&1
     if %errorlevel% equ 0 (
-        echo  OK (COM)
+        echo  OK [COM]
         echo [%date% %time%] CHECKIN COM OK >> "%LOG_FILE%"
     ) else (
-        echo  [!] Check-in fallo
+        echo  [!!] Check-in fallo
         echo [%date% %time%] CHECKIN FALLIDO >> "%LOG_FILE%"
     )
 )
@@ -439,7 +439,7 @@ if %errorlevel% equ 0 (
     echo  Tarea creada: %TASK_NAME% (cada 5 min)
     echo [%date% %time%] schtask OK >> "%LOG_FILE%"
 ) else (
-    echo  [!] No se pudo crear tarea programada
+    echo  [!!] No se pudo crear tarea programada
     echo [%date% %time%] schtask ERROR >> "%LOG_FILE%"
     if %SILENT% equ 1 (
         echo [%date% %time%] schtask ERROR en modo silent >> "%LOG_FILE%"
